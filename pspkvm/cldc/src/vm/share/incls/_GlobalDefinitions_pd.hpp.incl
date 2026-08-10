@@ -1,0 +1,2 @@
+#include "GlobalDefinitions_gcc.hpp"
+#include "GlobalDefinitions_mips.hpp"

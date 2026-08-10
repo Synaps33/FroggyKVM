@@ -1,0 +1,8 @@
+// Generated for OsFile_<os_family>.hpp
+#include "BuildFlags_<os_family>.hpp"
+#include "BuildFlags.hpp"
+#include "kni_md.h"
+#include "ROMImage.hpp"
+#include "GlobalDefinitions_<compiler>.hpp"
+#include "Globals_<os_family>.hpp"
+#include "OS_<os_family>.hpp"

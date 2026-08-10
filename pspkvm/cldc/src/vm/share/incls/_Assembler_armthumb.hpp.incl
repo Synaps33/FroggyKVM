@@ -1,0 +1,6 @@
+// Generated for Assembler_armthumb.hpp
+#include "BuildFlags_javacall.hpp"
+#include "BuildFlags.hpp"
+#include "kni_md.h"
+#include "ROMImage.hpp"
+#include "Globals_javacall.hpp"

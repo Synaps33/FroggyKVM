@@ -17,3 +17,8 @@ Thumbs.db
 
 # Logs
 *.log
+
+*.zip
+*.tar.*
+msys64/
+

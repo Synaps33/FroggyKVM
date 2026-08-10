@@ -1,0 +1,12 @@
+// Generated for Main_<os_family>.cpp
+#include "BuildFlags_<os_family>.hpp"
+#include "BuildFlags.hpp"
+#include "kni_md.h"
+#include "ROMImage.hpp"
+#include "GlobalDefinitions_<compiler>.hpp"
+#include "Globals_<os_family>.hpp"
+#include "jvmspi.h"
+#include "sni.h"
+#include "OS_<os_family>.hpp"
+#include "OS.hpp"
+#include "OsMisc_<os_family>.hpp"

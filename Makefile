@@ -1,35 +1,19 @@
-# PCSX4ALL libretro Makefile for SF2000
-# Based on UAE4ALL libretro Makefile - follow EXACT same patterns!
-# QPSX_111 - MIPS32 ASM CDDA mixer + runtime toggle
-# QPSX_110 - CDDA Runtime Options, Profiler CDDA, DirectBlockLUT fix
-# QPSX_100 - Direct Block LUT: 1-level lookup replaces 2-level psxRecLUT
-# QPSX_099 - Pure ASM memory functions (psxmem_asm.S)
-# QPSX_043 - REAL BIOS: Use scph5501.bin instead of HLE + debug logging
-
-NAME    = pcsx4all
+# J2ME (PSPKVM) libretro Makefile for GB300 / SF2000 Multicore
+NAME    = j2me
 O       = o
 RM      = rm -f
 
-# GPU plugin selection
-GPU     = gpu_unai
-SPU     = spu_pcsxrearmed
-
-# Use MIPS recompiler
-RECOMPILER = mips
-
-# SF2000 platform - FLAGS FROM MULTICORE FRAMEWORK (beetle-psx + main Makefile)
 ifeq ($(platform), sf2000)
-    TARGET := _libretro_sf2000.a
+    TARGET := $(NAME)_libretro_$(platform).a
     MIPS=/opt/mips32-mti-elf/2019.09-03-2/bin/mips-mti-elf-
     CC = $(MIPS)gcc
     CXX = $(MIPS)g++
     AR = $(MIPS)ar
-    # FLAGS EXACTLY FROM MULTICORE (main Makefile + beetle-psx):
     CFLAGS += -EL -march=mips32 -mtune=mips32 -msoft-float -ffast-math
     CFLAGS += -G0 -mno-abicalls -fno-pic -ffreestanding
     CFLAGS += -ffunction-sections -fdata-sections
-    CFLAGS += -fno-use-cxa-atexit
-    CFLAGS += -DSF2000 -DNO_THREADS
+    CFLAGS += -DSF2000 -DNO_THREADS -DGB300 -DPSP_COMPAT
+    CXXFLAGS += -fno-use-cxa-atexit
     STATIC_LINKING = 1
 else
     TARGET = $(NAME)_libretro.so
@@ -39,135 +23,243 @@ endif
 
 all: $(TARGET)
 
-# Port selection - libretro (not SDL!)
-PORT = libretro
-
-# Common flags (based on UAE4ALL pattern)
-ifeq ($(platform), sf2000)
-MORE_CFLAGS = -Os -Isrc/ -Isrc/spu/$(SPU) -Isrc/gpu/$(GPU) \
-	-Isrc/plugin_lib \
-	-Isrc/port/$(PORT) \
-	-Ilibretro/core -Ilibretro/include \
-	-fomit-frame-pointer -fno-threadsafe-statics \
+MORE_CFLAGS = -Os -DUSE_PRECOMPILED_HEADER=1 \
+	-I. \
+	-Ipspkvm/platform_gb300 \
+	-Ilibretro/core \
+	-Ipspkvm/javacall/interface \
+	-Ipspkvm/javacall/interface/common \
+	-Ipspkvm/javacall/interface/midp \
+	-Ipspkvm/javacall/implementation/psp_mips \
+	-Ipspkvm/javacall/implementation/psp_mips/common \
+	-Ipspkvm/javacall/implementation/psp_mips/midp \
+	-Ipspkvm/javacall/implementation/share/properties/inc \
+	-Ipspkvm/cldc/src/vm/share \
+	-Ipspkvm/cldc/src/vm/share/incls \
+	-Ipspkvm/cldc/src/vm/os/javacall \
+	-Ipspkvm/cldc/src/vm/os/utilities \
+	-Ipspkvm/cldc/src/vm/cpu/mips \
+	-Ipspkvm/cldc/src/vm/share/compiler \
+	-Ipspkvm/cldc/src/vm/share/debugger \
+	-Ipspkvm/cldc/src/vm/share/float \
+	-Ipspkvm/cldc/src/vm/share/handles \
+	-Ipspkvm/cldc/src/vm/share/interpreter \
+	-Ipspkvm/cldc/src/vm/share/isolate \
+	-Ipspkvm/cldc/src/vm/share/memory \
+	-Ipspkvm/cldc/src/vm/share/memoryprofiler \
+	-Ipspkvm/cldc/src/vm/share/natives \
+	-Ipspkvm/cldc/src/vm/share/ROM \
+	-Ipspkvm/cldc/src/vm/share/runtime \
+	-Ipspkvm/cldc/src/vm/share/utilities \
+	-Ipspkvm/cldc/src/vm/share/verifier \
+	-Ipspkvm/cldc/src/vm/share/natives \
+	-Ipspkvm/cldc/src/vm/cpu/mips \
+	-Ipspkvm/cldc/src/vm/cpu/c \
+	-Ipspkvm/cldc/src/vm/psp \
+	-Ipspkvm/midp/src/ams \
+	-Ipspkvm/midp/src/ams/ams_base_cldc/include \
+	-Ipspkvm/midp/src/ams/example/javacall_common/include \
+	-Ipspkvm/midp/src/ams/example/jams/include \
+	-Ipspkvm/midp/src/ams/example/jams_port/include \
+	-Ipspkvm/midp/src/ams/example/jams_port/javacall/native \
+	-Ipspkvm/midp/src/ams/example/ams_common/include \
+	-Ipspkvm/midp/src/ams/example/ams_common_port/include \
+	-Ipspkvm/midp/src/events/eventqueue/include \
+	-Ipspkvm/midp/src/events/eventqueue_port/include \
+	-Ipspkvm/midp/src/events/eventsystem/include \
+	-Ipspkvm/midp/src/ams/ams_base/include \
+	-Ipspkvm/midp/src/ams/suitestore/common_api/include \
+	-Ipspkvm/midp/src/ams/suitestore/internal_api/include \
+	-Ipspkvm/midp/src/ams/suitestore/task_manager_api/include \
+	-Ipspkvm/midp/src/configuration/properties_port/include \
+	-Ipspkvm/midp/src/core/vm_services/include \
+	-Ipspkvm/midp/src/core/string/include \
+	-Ipspkvm/midp/src/core/log_base/include \
+	-Ipspkvm/midp/src/core/global_status/include \
+	-Ipspkvm/midp/src/core/storage/include \
+	-Ipspkvm/midp/src/core/memory/include \
+	-Ipspkvm/midp/src/core/timezone/include \
+	-Ipspkvm/midp/src/core/suspend_resume/sr_main/include \
+	-Ipspkvm/midp/src/core/kni_util/include \
+	-Ipspkvm/midp/src/i18n/i18n_main/include \
+	-Ipspkvm/midp/src/highlevelui/javacall_application/include \
+	-Ipspkvm/midp/src/highlevelui/lcdlf/include \
+	-Ipspkvm/midp/src/push/push_server/include \
+	-Ipspkvm/midp/src/lowlevelui/graphics_api/include \
+	-Ipspkvm/midp/src/lowlevelui/graphics/include \
+	-Ipspkvm/midp/src/lowlevelui/image_api/include \
+	-Ipspkvm/pcsl/memory \
+	-Ipspkvm/pcsl/memory/memory_port \
+	-Ipspkvm/pcsl/memory/memory_port/javacall \
+	-Ipspkvm/pcsl/memory/heap \
+	-Ipspkvm/pcsl/memory/pki/include \
+	-Ipspkvm/pcsl/file \
+	-Ipspkvm/pcsl/print \
+	-Ipspkvm/pcsl/string \
+	-Ipspkvm/pcsl/string/utf16 \
+	-Ipspkvm/pcsl/types \
+	-Ipspkvm/pcsl/types/javacall_psp_gcc \
+	-Ipspkvm/pisces/src/native/midp/include \
+	-Ipspkvm/pisces/src/native/common/include \
+	-fomit-frame-pointer \
 	-Wno-unused -Wno-format -Wno-sign-compare \
-	-fno-exceptions -fno-rtti \
-	-DINLINE="static __inline__" \
-	-D$(shell echo $(GPU) | tr a-z A-Z) \
-	-D$(shell echo $(SPU) | tr a-z A-Z)
-else
-MORE_CFLAGS = -g -O2 -Isrc/ -Isrc/spu/$(SPU) -Isrc/gpu/$(GPU) \
-	-Isrc/plugin_lib \
-	-Isrc/port/$(PORT) \
-	-Ilibretro/core -Ilibretro/include \
-	-fomit-frame-pointer -fno-threadsafe-statics \
-	-Wno-unused -Wno-format -Wno-sign-compare \
-	-fno-exceptions -fno-rtti \
-	-DINLINE="static __inline__" \
-	-D$(shell echo $(GPU) | tr a-z A-Z) \
-	-D$(shell echo $(SPU) | tr a-z A-Z)
-endif
-
-# Libretro defines
-MORE_CFLAGS += -D__LIBRETRO__
-MORE_CFLAGS += -DHAVE_LIBRETRO
-
-# QPSX_035: Enable MIPS recompiler for SF2000
-# Cache flush now uses __builtin___clear_cache() -> _flush_cache() from multicore framework
-MORE_CFLAGS += -DPSXREC -D$(RECOMPILER)
-
-# Use gpulib
-MORE_CFLAGS += -DUSE_GPULIB
-MORE_CFLAGS += -Isrc/gpu/gpulib
-
-# HLE BIOS
-MORE_CFLAGS += -DHLE_BIOS
-
-# NO ZLIB on SF2000 (bare metal has no zlib)
-ifeq ($(platform), sf2000)
-MORE_CFLAGS += -DNO_ZLIB
-endif
-
-# XA audio hack
-MORE_CFLAGS += -DXA_HACK
+	-D__LIBRETRO__ -DHAVE_LIBRETRO -DLC_CORE_STACK=LC_CORE
 
 CFLAGS  += $(MORE_CFLAGS)
 CXXFLAGS = $(CFLAGS)
 
-# Object files - Core PSX emulation
 OBJS = \
-	src/r3000a.o \
-	src/misc.o \
-	src/plugins.o \
-	src/psxmem.o \
-	src/psxhw.o \
-	src/psxcounters.o \
-	src/psxdma.o \
-	src/psxbios.o \
-	src/psxhle.o \
-	src/psxevents.o \
-	src/psxcommon.o \
-	src/psxinterpreter.o \
-	src/mdec.o \
-	src/decode_xa.o \
-	src/cdriso.o \
-	src/cdrom.o \
-	src/ppf.o \
-	src/sio.o \
-	src/pad.o \
-	src/gte.o \
-	src/profiler.o
-
-# MIPS Recompiler - QPSX_035: Enabled for SF2000 with custom cache flush
-OBJS += \
-	src/recompiler/mips/recompiler.o \
-	src/recompiler/mips/mips_codegen.o \
-	src/recompiler/mips/mips_disasm.o \
-	src/recompiler/mips/mem_mapping.o
-
-# GPU - using gpulib + unai
-OBJS += \
-	src/gpu/$(GPU)/gpulib_if.o \
-	src/gpu/gpulib/gpu.o \
-	src/gpu/gpulib/vout_port.o
-
-# QPSX v091: MIPS32 Assembly optimizations (SF2000 only)
-# QPSX v099: Added psxmem_asm.o for memory write optimization
-ifeq ($(platform), sf2000)
-OBJS += \
-	src/gpu/$(GPU)/gpu_inner_mips32.o \
-	src/gte_asm.o \
-	src/psxmem_asm.o
-endif
-
-# SPU - pcsxrearmed with libretro audio backend
-OBJS += \
-	src/spu/$(SPU)/spu.o \
-	src/spu/$(SPU)/dma.o \
-	src/spu/$(SPU)/freeze.o \
-	src/spu/$(SPU)/out.o \
-	src/spu/$(SPU)/nullsnd.o \
-	src/spu/$(SPU)/registers.o \
-	src/spu/$(SPU)/libretro.o
-
-# QPSX v111: MIPS32 ASM CDDA mixer (SF2000 only)
-ifeq ($(platform), sf2000)
-OBJS += \
-	src/spu/$(SPU)/cdda_mix_asm.o
-endif
-
-# Plugin lib
-OBJS += \
-	src/plugin_lib/plugin_lib.o \
-	src/plugin_lib/perfmon.o \
-	src/plugin_lib/pl_sshot.o
-
-# Libretro port
-OBJS += \
-	src/port/$(PORT)/port.o
-
-# Libretro core
-OBJS += \
-	libretro/core/libretro-core.o
+	pspkvm/platform_gb300/video.o \
+	pspkvm/platform_gb300/audio.o \
+	pspkvm/platform_gb300/input.o \
+	pspkvm/platform_gb300/filesystem.o \
+	pspkvm/platform_gb300/timer.o \
+	pspkvm/platform_gb300/platform.o \
+	pspkvm/platform_gb300/vm_stubs.o \
+	pspkvm/platform_gb300/vm_stubs_cpp.o \
+	pspkvm/platform_gb300/Throw_override.o \
+	pspkvm/cldc/src/vm/share/runtime/ClassFileParser.o \
+	pspkvm/cldc/src/vm/share/handles/ConstantPool.o \
+	pspkvm/platform_gb300/interp_stubs.o \
+	pspkvm/javacall/implementation/psp_mips/common/events.o \
+	pspkvm/javacall/implementation/psp_mips/common/memory.o \
+	pspkvm/javacall/implementation/psp_mips/common/logging.o \
+	pspkvm/javacall/implementation/psp_mips/common/file.o \
+	pspkvm/cldc/src/vm/share/handles/JavaClass.o \
+	pspkvm/cldc/src/vm/share/handles/FieldType.o \
+	pspkvm/cldc/src/vm/share/handles/Signature.o \
+	pspkvm/cldc/src/vm/share/handles/StackmapList.o \
+	pspkvm/cldc/src/vm/share/handles/ClassInfo.o \
+	pspkvm/cldc/src/vm/share/handles/ClassParserState.o \
+	pspkvm/cldc/src/vm/share/memory/ClassInfoDesc.o \
+	pspkvm/cldc/src/vm/share/memory/ClassParserStateDesc.o \
+	pspkvm/cldc/src/vm/share/memory/StackmapListDesc.o \
+	pspkvm/cldc/src/vm/share/memory/StackmapGenerator.o \
+	pspkvm/cldc/src/vm/share/runtime/FileDecoder.o \
+	pspkvm/cldc/src/vm/share/runtime/BufferedFile.o \
+	pspkvm/cldc/src/vm/share/runtime/HotRoutines0.o \
+	pspkvm/cldc/src/vm/share/runtime/HotRoutines1.o \
+	pspkvm/cldc/src/vm/share/runtime/Scheduler.o \
+	pspkvm/cldc/src/vm/share/compiler/BytecodeClosure.o \
+	pspkvm/cldc/src/vm/share/interpreter/GPSkeleton.o \
+	pspkvm/cldc/src/vm/share/utilities/CharacterStream.o \
+	pspkvm/cldc/src/vm/share/utilities/ErrorMessage.o \
+	pspkvm/cldc/src/vm/share/utilities/GlobalDefinitions.o \
+	pspkvm/cldc/src/vm/cpu/mips/GlobalDefinitions_mips.o \
+	pspkvm/javacall/implementation/psp_mips/midp/lcd.o \
+	pspkvm/javacall/implementation/psp_mips/midp/input.o \
+	pspkvm/javacall/implementation/psp_mips/midp/font.o \
+	pspkvm/javacall/implementation/psp_mips/midp/image.o \
+	pspkvm/javacall/implementation/psp_mips/midp/lifecycle.o \
+	pspkvm/javacall/implementation/psp_mips/midp/keypress.o \
+	pspkvm/javacall/implementation/psp_mips/midp/keymap.o \
+	pspkvm/javacall/implementation/psp_mips/midp/time.o \
+	pspkvm/javacall/implementation/psp_mips/midp/alpha_blend.o \
+	pspkvm/javacall/implementation/psp_mips/midp/ft_support.o \
+	pspkvm/midp/src/highlevelui/javacall_application/reference/native/javanotify_functions.o \
+	pspkvm/midp/src/ams/example/javacall_common/reference/native/javaTask.o \
+	pspkvm/midp/src/ams/example/jams/native/runMidlet.o \
+	pspkvm/midp/src/ams/example/jams_port/javacall/native/runMidlet_md.o \
+	pspkvm/midp/src/ams/ams_base/reference/native/midpInit.o \
+	pspkvm/midp/src/ams/ams_base_cldc/reference/native/midpCommandState.o \
+	pspkvm/midp/src/ams/ams_base_cldc/reference/native/midp_run.o \
+	pspkvm/cldc/src/vm/share/handles/JavaNear.o \
+	pspkvm/cldc/src/vm/share/runtime/IsolateObj.o \
+	pspkvm/pisces/src/native/common/src/PiscesBlit.o \
+	pspkvm/pisces/src/native/common/src/PiscesLibrary.o \
+	pspkvm/pisces/src/native/common/src/PiscesMath.o \
+	pspkvm/pisces/src/native/common/src/PiscesPipelines.o \
+	pspkvm/pisces/src/native/common/src/PiscesRenderer.o \
+	pspkvm/pisces/src/native/common/src/PiscesTransform.o \
+	pspkvm/pisces/src/native/common/src/PiscesUtil.o \
+	pspkvm/pisces/src/native/midp/src/JAbstractSurface.o \
+	pspkvm/pisces/src/native/midp/src/JGraphicsSurfaceDestination.o \
+	pspkvm/pisces/src/native/midp/src/JJavaSurface.o \
+	pspkvm/pisces/src/native/midp/src/JNativeFinalizer.o \
+	pspkvm/pisces/src/native/midp/src/JNativeSurface.o \
+	pspkvm/pisces/src/native/midp/src/JPiscesFinalizer.o \
+	pspkvm/pisces/src/native/midp/src/JPiscesRenderer.o \
+	pspkvm/pisces/src/native/midp/src/JTransform.o \
+	pspkvm/pisces/src/native/midp/src/KNIUtil.o \
+	pspkvm/pisces/src/native/midp/src/PiscesSysutils.o \
+	pspkvm/pcsl/string/utf16/pcsl_string.o \
+	pspkvm/pcsl/memory/memory_port/javacall/pcsl_memory_port.o \
+	pspkvm/pcsl/file/javacall/pcsl_file.o \
+	pspkvm/pcsl/file/javacall/pcsl_dir.o \
+	pspkvm/pcsl/print/javacall/pcsl_print.o \
+	pspkvm/cldc/src/vm/os/javacall/JVM_javacall.o \
+	pspkvm/cldc/src/vm/os/javacall/OS_javacall.o \
+	pspkvm/cldc/src/vm/os/javacall/OsMisc_javacall.o \
+	pspkvm/cldc/src/vm/os/javacall/OsFile_javacall.o \
+	pspkvm/cldc/src/vm/os/javacall/OsMemory_javacall.o \
+	pspkvm/cldc/src/vm/share/runtime/JVM.o \
+	pspkvm/cldc/src/vm/share/runtime/OS.o \
+	pspkvm/cldc/src/vm/share/runtime/OsMemory.o \
+	pspkvm/cldc/src/vm/share/runtime/OsFile.o \
+	pspkvm/cldc/src/vm/share/runtime/TaskContext.o \
+	pspkvm/cldc/src/vm/share/runtime/Throwable.o \
+	pspkvm/cldc/src/vm/share/runtime/Throw.o \
+	pspkvm/cldc/src/vm/share/runtime/Synchronizer.o \
+	pspkvm/cldc/src/vm/share/runtime/JavaVTable.o \
+	pspkvm/cldc/src/vm/share/runtime/Field.o \
+	pspkvm/cldc/src/vm/share/runtime/FilePath.o \
+	pspkvm/cldc/src/vm/share/runtime/Frame.o \
+	pspkvm/cldc/src/vm/share/runtime/JarFileParser.o \
+	pspkvm/cldc/src/vm/share/runtime/ClassFileParser.o \
+	pspkvm/cldc/src/vm/share/runtime/ClassPathAccess.o \
+	pspkvm/cldc/src/vm/share/runtime/Inflate.o \
+	pspkvm/cldc/src/vm/share/runtime/SystemDictionary.o \
+	pspkvm/cldc/src/vm/share/runtime/Task.o \
+	pspkvm/cldc/src/vm/share/runtime/Thread.o \
+	pspkvm/cldc/src/vm/share/handles/Universe.o \
+	pspkvm/cldc/src/vm/share/handles/SymbolTable.o \
+	pspkvm/cldc/src/vm/share/handles/StringTable.o \
+	pspkvm/cldc/src/vm/share/handles/InstanceClass.o \
+	pspkvm/cldc/src/vm/share/handles/ArrayClass.o \
+	pspkvm/cldc/src/vm/share/handles/ObjArrayClass.o \
+	pspkvm/cldc/src/vm/share/handles/TypeArrayClass.o \
+	pspkvm/cldc/src/vm/share/handles/Method.o \
+	pspkvm/cldc/src/vm/share/handles/ConstantPool.o \
+	pspkvm/cldc/src/vm/share/handles/ExecutionStack.o \
+	pspkvm/cldc/src/vm/share/handles/Symbol.o \
+	pspkvm/cldc/src/vm/share/handles/Symbols.o \
+	pspkvm/cldc/src/vm/share/handles/TypeSymbol.o \
+	pspkvm/cldc/src/vm/share/handles/Instance.o \
+	pspkvm/cldc/src/vm/share/handles/Array.o \
+	pspkvm/cldc/src/vm/share/handles/ObjArray.o \
+	pspkvm/cldc/src/vm/share/handles/TypeArray.o \
+	pspkvm/cldc/src/vm/share/handles/String.o \
+	pspkvm/cldc/src/vm/share/handles/TaskMirror.o \
+	pspkvm/cldc/src/vm/share/handles/ThreadObj.o \
+	pspkvm/cldc/src/vm/share/handles/Oop.o \
+	pspkvm/cldc/src/vm/share/handles/RefArray.o \
+	pspkvm/cldc/src/vm/share/memory/OopDesc.o \
+	pspkvm/cldc/src/vm/share/memory/FarClassDesc.o \
+	pspkvm/cldc/src/vm/share/memory/MethodDesc.o \
+	pspkvm/cldc/src/vm/share/memory/ExecutionStackDesc.o \
+	pspkvm/cldc/src/vm/share/memory/FinalizerConsDesc.o \
+	pspkvm/cldc/src/vm/share/memory/SymbolDesc.o \
+	pspkvm/cldc/src/vm/share/memory/ObjectHeap.o \
+	pspkvm/cldc/src/vm/share/memory/Allocation.o \
+	pspkvm/cldc/src/vm/share/ROM/ROM.o \
+	pspkvm/cldc/src/vm/share/ROM/ROMSkeleton.o \
+	pspkvm/cldc/src/vm/share/interpreter/OopMapsSkeleton.o \
+	pspkvm/cldc/src/vm/share/utilities/Arguments.o \
+	pspkvm/cldc/src/vm/share/utilities/AccessFlags.o \
+	pspkvm/cldc/src/vm/share/utilities/ConstantTag.o \
+	pspkvm/cldc/src/vm/share/utilities/Debug.o \
+	pspkvm/cldc/src/vm/share/utilities/Globals.o \
+	pspkvm/cldc/src/vm/share/utilities/Stream.o \
+	pspkvm/cldc/src/vm/share/verifier/Verifier.o \
+	pspkvm/cldc/src/vm/share/verifier/VerifierFrame.o \
+	pspkvm/cldc/src/vm/share/verifier/VerifyMethodCodes.o \
+	pspkvm/cldc/src/vm/share/interpreter/InterpreterRuntime.o \
+	pspkvm/cldc/src/vm/share/interpreter/TemplateTable.o \
+	pspkvm/cldc/src/vm/share/natives/kni.o \
+	pspkvm/cldc/src/vm/share/natives/Natives.o \
+	pspkvm/cldc/src/vm/cpu/c/Interpreter_c.o \
+	pspkvm/cldc/src/vm/share/interpreter/Bytecodes.o \
+	pspkvm/cldc/src/vm/cpu/c/FloatSupport_c.o
 
 $(TARGET): $(OBJS)
 ifeq ($(STATIC_LINKING), 1)
@@ -179,15 +271,13 @@ endif
 clean:
 	$(RM) $(TARGET) $(OBJS)
 
-# Compilation rules
+CFLAGS += $(MORE_CFLAGS)
+CXXFLAGS += $(CFLAGS) $(MORE_CFLAGS)
+
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 %.o: %.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-%.o: %.S
-	$(CC) $(CFLAGS) -c $< -o $@
-
-%.o: %.s
-	$(CC) $(CFLAGS) -c $< -o $@
+.PHONY: all clean

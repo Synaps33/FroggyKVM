@@ -1,0 +1,12 @@
+// Generated for ObjectHeap_<iarch>.hpp
+#include "BuildFlags_javacall.hpp"
+#include "BuildFlags.hpp"
+#include "kni_md.h"
+#include "ROMImage.hpp"
+#include "Globals_javacall.hpp"
+#include "OS.hpp"
+#include "OS_javacall.hpp"
+#include "OsFile_javacall.hpp"
+#include "OsFile.hpp"
+#include "Top.hpp"
+#include "CompiledMethodCache.hpp"
