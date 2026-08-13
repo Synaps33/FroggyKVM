@@ -17,7 +17,7 @@ void ConstantPool::resolve_helper_0(int index, Symbol* name, Symbol* signature,
     jubyte *tag = (jubyte*)ta().base_address();
     if (!is_within_bounds(index, len) ||
         !ConstantTag::is_field_or_method(tag[index])) {
-      fprintf(stderr, "[GB300-DEBUG] resolve_helper_0 err 1: index=%d out of bounds or not field/method. tag=%d\n", index, tag[index]);
+      printf("[GB300-DEBUG] resolve_helper_0 err 1: index=%d out of bounds or not field/method. tag=%d\n", index, tag[index]);
       goto error;
     }
     value = int_field(offset_from_index(index));
@@ -25,12 +25,12 @@ void ConstantPool::resolve_helper_0(int index, Symbol* name, Symbol* signature,
     class_index         = extract_low_jushort_from_jint (value);
     if (!is_within_bounds(name_and_type_index, len) ||
         !ConstantTag::is_name_and_type(tag[name_and_type_index])) {
-      fprintf(stderr, "[GB300-DEBUG] resolve_helper_0 err 2: name_and_type_index=%d out of bounds or not name_and_type. tag=%d\n", name_and_type_index, tag[name_and_type_index]);
+      printf("[GB300-DEBUG] resolve_helper_0 err 2: name_and_type_index=%d out of bounds or not name_and_type. tag=%d\n", name_and_type_index, tag[name_and_type_index]);
       goto error;
     }
     if (!is_within_bounds(class_index, len) || 
         !ConstantTag::is_klass(tag[class_index])) {
-      fprintf(stderr, "[GB300-DEBUG] resolve_helper_0 err 3: class_index=%d out of bounds or not klass. tag=%d\n", class_index, tag[class_index]);
+      printf("[GB300-DEBUG] resolve_helper_0 err 3: class_index=%d out of bounds or not klass. tag=%d\n", class_index, tag[class_index]);
       goto error;
     }
     name_and_type_value = int_field(offset_from_index(name_and_type_index));
@@ -38,12 +38,12 @@ void ConstantPool::resolve_helper_0(int index, Symbol* name, Symbol* signature,
     signature_index = extract_high_jushort_from_jint(name_and_type_value);
     if (!is_within_bounds(name_index, len) ||
         !ConstantTag::is_utf8(tag[name_index])) {
-      fprintf(stderr, "[GB300-DEBUG] resolve_helper_0 err 4: name_index=%d out of bounds or not utf8. tag=%d\n", name_index, tag[name_index]);
+      printf("[GB300-DEBUG] resolve_helper_0 err 4: name_index=%d out of bounds or not utf8. tag=%d\n", name_index, tag[name_index]);
       goto error;
     }
     if (!is_within_bounds(signature_index, len) ||
         !ConstantTag::is_utf8(tag[signature_index])) {
-      fprintf(stderr, "[GB300-DEBUG] resolve_helper_0 err 5: sig_index=%d out of bounds or not utf8. tag=%d\n", signature_index, tag[signature_index]);
+      printf("[GB300-DEBUG] resolve_helper_0 err 5: sig_index=%d out of bounds or not utf8. tag=%d\n", signature_index, tag[signature_index]);
       goto error;
     }
     *name = symbol_at(name_index);
@@ -80,26 +80,26 @@ int ConstantPool::name_and_type_ref_index_at(int index JVM_TRAPS) {
   jint ref_index, name_and_type_index;
 
   if ((juint)index >= (juint)len) {
-    fprintf(stderr, "[GB300-DEBUG] name_and_type_ref_index_at error 1: index=%d >= len=%d\n", index, len);
+    printf("[GB300-DEBUG] name_and_type_ref_index_at error 1: index=%d >= len=%d\n", index, len);
     goto error;
   }
   ref_index = val_base[index];
   {
     ConstantTag tag1(tag_base[index]);
     if (!tag1.is_field_or_method()) {
-      fprintf(stderr, "[GB300-DEBUG] name_and_type_ref_index_at error 2: tag1=%d is not field/method at index=%d\n", tag1.value(), index);
+      printf("[GB300-DEBUG] name_and_type_ref_index_at error 2: tag1=%d is not field/method at index=%d\n", tag1.value(), index);
       goto error;
     }
   }
   name_and_type_index = extract_high_jshort_from_jint(ref_index);
   if ((juint)name_and_type_index >= (juint)len) {
-    fprintf(stderr, "[GB300-DEBUG] name_and_type_ref_index_at error 3: name_and_type_index=%d >= len=%d\n", name_and_type_index, len);
+    printf("[GB300-DEBUG] name_and_type_ref_index_at error 3: name_and_type_index=%d >= len=%d\n", name_and_type_index, len);
     goto error;
   }
   {
     ConstantTag tag2(tag_base[name_and_type_index]);
     if (!tag2.is_name_and_type()) {
-      fprintf(stderr, "[GB300-DEBUG] name_and_type_ref_index_at error 4: tag2=%d is not name_and_type at name_and_type_index=%d\n", tag2.value(), name_and_type_index);
+      printf("[GB300-DEBUG] name_and_type_ref_index_at error 4: tag2=%d is not name_and_type at name_and_type_index=%d\n", tag2.value(), name_and_type_index);
       goto error;
     }
   }

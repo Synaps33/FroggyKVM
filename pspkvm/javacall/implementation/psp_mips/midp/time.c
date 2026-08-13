@@ -236,7 +236,7 @@ javacall_time_seconds /*OPTIONAL*/ javacall_time_get_seconds_since_1970(void){
  * @return elapsed time in milliseconds
  */
 javacall_time_milliseconds /*OPTIONAL*/ javacall_time_get_clock_milliseconds(void){
-    return 0;
+    return (javacall_time_milliseconds)(sceKernelGetSystemTimeWide() / 1000LL);
 }
 
 #ifdef __cplusplus

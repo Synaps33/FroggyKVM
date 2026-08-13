@@ -13,7 +13,7 @@ ifeq ($(platform), sf2000)
     CFLAGS += -G0 -mno-abicalls -fno-pic -ffreestanding
     CFLAGS += -ffunction-sections -fdata-sections
     CFLAGS += -DSF2000 -DNO_THREADS -DGB300 -DPSP_COMPAT
-    CXXFLAGS += -fno-use-cxa-atexit
+    CXXFLAGS += -fno-use-cxa-atexit -fno-exceptions -fno-rtti
     STATIC_LINKING = 1
 else
     TARGET = $(NAME)_libretro.so
@@ -23,7 +23,7 @@ endif
 
 all: $(TARGET)
 
-MORE_CFLAGS = -O3 -fno-strict-aliasing -DUSE_PRECOMPILED_HEADER=1 \
+MORE_CFLAGS = -O2 -fno-strict-aliasing -DUSE_PRECOMPILED_HEADER=1 \
 	-I. \
 	-Ipspkvm/platform_gb300 \
 	-Ilibretro/core \

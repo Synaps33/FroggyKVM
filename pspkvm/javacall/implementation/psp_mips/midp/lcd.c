@@ -41,8 +41,8 @@ extern const unsigned short DukeTango[];
 
 static unsigned short* vram = (unsigned short*) (0x40000000 | 0x04000000);
 
-static int vscr_w = 480;
-static int vscr_h = 272;
+static int vscr_w = 240;
+static int vscr_h = 240;
 
 static int resized = 0;
 

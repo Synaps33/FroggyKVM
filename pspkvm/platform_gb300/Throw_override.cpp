@@ -130,8 +130,7 @@ Throw::allocate_exception(Symbol* class_name, String* message JVM_TRAPS) {
 
 void Throw::error(ErrorMsgTag err JVM_TRAPS) {
   void* ra = __builtin_return_address(0);
-  fprintf(stderr, "[GB300-DEBUG] Throw::error called! err=%d, caller=%p\n", err, ra);
-  fflush(stderr);
+  printf("[GB300-DEBUG] Throw::error called! err=%d, caller=%p\n", err, ra);
   allocate_and_throw(Symbols::java_lang_Error(), err JVM_NO_CHECK_AT_BOTTOM);
 }
 
@@ -143,15 +142,17 @@ static const char* const g_error_msgs[] = {
 
 void Throw::class_format_error(ErrorMsgTag err JVM_TRAPS) {
   void* ra = __builtin_return_address(0);
-  const char* err_str = (err >= 0 && err < (sizeof(g_error_msgs)/sizeof(char*))) ? g_error_msgs[err] : "UNKNOWN";
-  fprintf(stderr, "[GB300-DEBUG] Throw::class_format_error called! err=%d, msg='%s', caller=%p\n", err, err_str, ra);
-  fflush(stderr);
+  const char* err_str = (err >= 0 && err < (int)(sizeof(g_error_msgs)/sizeof(char*))) ? g_error_msgs[err] : "UNKNOWN";
+  printf("[GB300-DEBUG] Throw::class_format_error called! err=%d, msg='%s', caller=%p\n", err, err_str, ra);
   allocate_and_throw(Symbols::java_lang_ClassFormatError(),
                      (char*)"ClassFormatError", err
                      JVM_NO_CHECK_AT_BOTTOM);
 }
 
 void Throw::verify_error(ErrorMsgTag err JVM_TRAPS) {
+  void* ra = __builtin_return_address(0);
+  const char* err_str = (err >= 0 && err < (int)(sizeof(g_error_msgs)/sizeof(char*))) ? g_error_msgs[err] : "UNKNOWN";
+  printf("[GB300-DEBUG] Throw::verify_error called! err=%d, msg='%s', caller=%p\n", err, err_str, ra);
   allocate_and_throw(Symbols::java_lang_VerifyError(), 
                      (char*)"VerifyError", err 
                      JVM_NO_CHECK_AT_BOTTOM);
@@ -168,8 +169,7 @@ void Throw::out_of_memory_error(JVM_SINGLE_ARG_TRAPS) {
 
   Thread::set_current_pending_exception(
       Universe::out_of_memory_error_instance());
-  fprintf(stderr, "[FATAL] OutOfMemoryError thrown!\n");
-  fflush(stderr);
+  printf("[FATAL] OutOfMemoryError thrown!\n");
 }
 
 

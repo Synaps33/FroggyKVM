@@ -143,19 +143,17 @@ RETRO_API void retro_run(void) {
         const char *rom = gb300_fs_get_jar();
         xlog("[PSPKVM-GB300] Starting Java VM for: %s\n", rom ? rom : "NULL");
 
-        char *argv[5];
+        char *argv[3];
         argv[0] = "pspkvm";
-        argv[1] = "-heapsize";
-        argv[2] = "4M";
         if (rom && (strstr(rom, ".jad") || strstr(rom, ".JAD"))) {
-            argv[3] = "-Xdescriptor";
+            argv[1] = "-Xdescriptor";
         } else {
-            argv[3] = "-jar";
+            argv[1] = "-jar";
         }
-        argv[4] = (char*)(rom ? rom : "");
+        argv[2] = (char*)(rom ? rom : "");
 
-        xlog("[PSPKVM-GB300] Invoking javanotify_start_java_with_arbitrary_args(argc=5, argv[4]='%s')...\n", argv[4]);
-        javanotify_start_java_with_arbitrary_args(5, argv);
+        xlog("[PSPKVM-GB300] Invoking javanotify_start_java_with_arbitrary_args(argc=3, argv[2]='%s')...\n", argv[2]);
+        javanotify_start_java_with_arbitrary_args(3, argv);
         xlog("[PSPKVM-GB300] javanotify returned. Now calling JavaTask()...\n");
         JavaTask();
         xlog("[PSPKVM-GB300] JavaTask() initialized.\n");
