@@ -23,7 +23,7 @@ endif
 
 all: $(TARGET)
 
-MORE_CFLAGS = -Os -DUSE_PRECOMPILED_HEADER=1 \
+MORE_CFLAGS = -O3 -fno-strict-aliasing -DUSE_PRECOMPILED_HEADER=1 \
 	-I. \
 	-Ipspkvm/platform_gb300 \
 	-Ilibretro/core \
