@@ -50,6 +50,54 @@ __attribute__((weak)) void xlog(const char *fmt, ...) {
 static jmp_buf s_exit_jmp;
 static volatile int s_exit_requested = 0;
 static volatile int s_can_exit_jmp = 0;
+static uint8_t s_jvm_dedicated_stack[128 * 1024] __attribute__((aligned(16)));
+
+static void gb300_fix_stack_canary(const char *loc) {
+    uint32_t *ptcb = NULL;
+#if defined(GB300V2)
+    ptcb = *(uint32_t**)0x80c5fd04;
+#elif defined(SF2000)
+    ptcb = *(uint32_t**)0x80c10514;
+#else
+    if (*(uint32_t**)0x80c5fd04 != NULL) ptcb = *(uint32_t**)0x80c5fd04;
+    else if (*(uint32_t**)0x80c10514 != NULL) ptcb = *(uint32_t**)0x80c10514;
+#endif
+    if (ptcb) {
+        uint32_t *stack_bottom = (uint32_t*)ptcb[5];
+        if (stack_bottom) {
+            uint32_t cur = *stack_bottom;
+            if (cur != 0x1a2b3c4d) {
+                xlog("[CANARY] [%s] Corrupted (0x%08x) -> restored 0x1a2b3c4d\n", loc, cur);
+                *stack_bottom = 0x1a2b3c4d;
+            } else {
+                xlog("[CANARY] [%s] OK (0x1a2b3c4d)\n", loc);
+            }
+        }
+    }
+}
+
+#if defined(__mips__)
+static void __attribute__((noinline)) gb300_run_on_jvm_stack(void (*func)(void), void *stack_top) {
+    register void (*r_func)(void) asm("a0") = func;
+    register void *r_stack asm("a1") = stack_top;
+    asm volatile (
+        "move   $s0, $sp\n\t"
+        "move   $sp, %1\n\t"
+        "addiu  $sp, $sp, -32\n\t"
+        "jalr   %0\n\t"
+        "nop\n\t"
+        "move   $sp, $s0\n\t"
+        :
+        : "r" (r_func), "r" (r_stack)
+        : "s0", "ra", "memory", "t0", "t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8", "t9", "v0", "v1"
+    );
+}
+#else
+static void gb300_run_on_jvm_stack(void (*func)(void), void *stack_top) {
+    (void)stack_top;
+    func();
+}
+#endif
 
 static retro_video_refresh_t video_cb = NULL;
 static retro_audio_sample_t audio_cb = NULL;
@@ -212,6 +260,7 @@ RETRO_API bool retro_load_game(const struct retro_game_info *game) {
 }
 
 RETRO_API void retro_unload_game(void) {
+    gb300_fix_stack_canary("retro_unload_game");
     xlog("[PSPKVM-GB300] retro_unload_game: Game unloaded\n");
     game_loaded = false;
     jvm_started = false;
@@ -328,16 +377,19 @@ RETRO_API void retro_run(void) {
 
         gb300_hacker_log("KVM", "STARTING JAVATASK THREAD", 50);
 
-        xlog("[PSPKVM-GB300] Entering JavaTask()...\n");
+        xlog("[PSPKVM-GB300] Entering JavaTask() on dedicated stack...\n");
+        gb300_fix_stack_canary("before-javatask");
         s_can_exit_jmp = 1;
         if (setjmp(s_exit_jmp) == 0) {
-            JavaTask();
+            void *stack_top = &s_jvm_dedicated_stack[sizeof(s_jvm_dedicated_stack) - 64];
+            gb300_run_on_jvm_stack(JavaTask, stack_top);
             s_can_exit_jmp = 0;
             xlog("[PSPKVM-GB300] JavaTask() finished normally.\n");
         } else {
             s_can_exit_jmp = 0;
             xlog("[PSPKVM-GB300] Returned from JavaTask() via hotkey exit.\n");
         }
+        gb300_fix_stack_canary("after-javatask");
 
         if (s_exit_requested) {
             xlog("[PSPKVM-GB300] Triggering multicore shutdown_game()...\n");

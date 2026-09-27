@@ -99,7 +99,7 @@ void gb300_fill_rect(int x, int y, int w, int h, uint16_t color) {
 /* Hacker Loader Console Implementation                                      */
 /* ========================================================================= */
 
-#define HACKER_MAX_LOGS 18
+#define HACKER_MAX_LOGS 15
 #define HACKER_LINE_MAX 42
 
 static char s_hacker_logs[HACKER_MAX_LOGS][HACKER_LINE_MAX];
@@ -109,6 +109,7 @@ static char s_main_class[48] = {0};
 static uint32_t s_boot_start_ms = 0;
 static int  s_boot_active = 0;
 static uint32_t s_last_log_draw_ms = 0;
+static int  s_hacker_progress = 0;
 
 /* Color constants in RGB565 */
 #define COLOR_BLACK         0x0000
@@ -142,12 +143,39 @@ static void hacker_render_screen(void) {
     /* Separator line */
     gb300_fill_rect(8, 29, GB300_SCREEN_WIDTH - 16, 1, COLOR_SCANLINE);
 
-    /* 3. Log stream (filling the rest of the screen) */
+    /* 3. Log stream */
     int log_start_y = 34;
     for (int i = 0; i < s_hacker_log_count && i < HACKER_MAX_LOGS; i++) {
         int text_y = log_start_y + i * 11;
         uint16_t text_color = (i == s_hacker_log_count - 1) ? COLOR_WHITE : COLOR_MATRIX_GREEN;
         gb300_draw_text(8, text_y, s_hacker_logs[i], text_color, 0);
+    }
+
+    /* 4. Bottom Progress Bar & Percentage */
+    gb300_fill_rect(8, 205, GB300_SCREEN_WIDTH - 16, 1, COLOR_SCANLINE);
+
+    char status_str[32];
+    snprintf(status_str, sizeof(status_str), "BOOTING: %3d%%", s_hacker_progress);
+    gb300_draw_text(8, 209, status_str, COLOR_CYAN, 0);
+
+    /* Progress bar rectangle */
+    int bar_x = 8;
+    int bar_y = 221;
+    int bar_w = GB300_SCREEN_WIDTH - 16; /* 304 px */
+    int bar_h = 11;
+
+    /* Outline */
+    gb300_fill_rect(bar_x, bar_y, bar_w, 1, COLOR_SCANLINE);
+    gb300_fill_rect(bar_x, bar_y + bar_h - 1, bar_w, 1, COLOR_SCANLINE);
+    gb300_fill_rect(bar_x, bar_y, 1, bar_h, COLOR_SCANLINE);
+    gb300_fill_rect(bar_x + bar_w - 1, bar_y, 1, bar_h, COLOR_SCANLINE);
+
+    /* Fill */
+    int max_fill = bar_w - 4;
+    int fill_w = (s_hacker_progress * max_fill) / 100;
+    if (fill_w > max_fill) fill_w = max_fill;
+    if (fill_w > 0) {
+        gb300_fill_rect(bar_x + 2, bar_y + 2, fill_w, bar_h - 4, COLOR_MATRIX_GREEN);
     }
 }
 
@@ -162,8 +190,11 @@ static void hacker_flush_to_screen(void) {
 }
 
 void gb300_hacker_log(const char *tag, const char *msg, int pct) {
-    (void)pct;
     if (!s_boot_active) return;
+    if (pct > s_hacker_progress) {
+        s_hacker_progress = pct;
+        if (s_hacker_progress > 100) s_hacker_progress = 100;
+    }
     if (s_boot_start_ms == 0) {
         s_boot_start_ms = gb300_timer_get_ms();
     }
@@ -193,6 +224,7 @@ void gb300_hacker_log(const char *tag, const char *msg, int pct) {
 void gb300_hacker_init(const char *rom_path) {
     s_boot_active = 1;
     s_hacker_log_count = 0;
+    s_hacker_progress = 5;
     s_boot_start_ms = gb300_timer_get_ms();
     s_last_log_draw_ms = 0;
     s_main_class[0] = '\0';
@@ -217,6 +249,13 @@ void gb300_hacker_set_main_class(const char *main_class) {
 
 void gb300_hacker_log_class(const char *classname) {
     if (!s_boot_active || !classname || !*classname) return;
+
+    if (s_hacker_progress < 98) {
+        static int class_counter = 0;
+        if (++class_counter % 2 == 0) {
+            s_hacker_progress++;
+        }
+    }
 
     /* Don't redraw too frequently (min 35ms) unless early in boot */
     uint32_t now = gb300_timer_get_ms();
@@ -245,6 +284,7 @@ void gb300_hacker_stop(void) {
 
 void gb300_hacker_exit(int exit_code) {
     s_boot_active = 1;
+    s_hacker_progress = 100;
     char exit_msg[32];
     snprintf(exit_msg, sizeof(exit_msg), "JVM EXITED (CODE %d)", exit_code);
     gb300_hacker_log("EXIT", exit_msg, 0);
