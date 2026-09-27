@@ -14,7 +14,9 @@ cd "${SCRIPT_DIR}"
 
 # 1. Build core static library
 echo "[1/4] Compiling FroggyKVM static library..."
-make platform=sf2000 clean 2>/dev/null || true
+if [ "$1" = "clean" ]; then
+    make platform=sf2000 clean 2>/dev/null || true
+fi
 make platform=sf2000 -j$(nproc)
 
 if [ ! -f "j2me_libretro_sf2000.a" ]; then
