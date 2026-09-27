@@ -47,7 +47,7 @@ void javacall_printf(const char *format, ...);
  * @return	  a pointer to the newly allocated memory, or <tt>0</tt> if not available
  */
 void* javacall_memory_heap_allocate(int size, /*OUT*/ int* outSize) {
-	int sz = 38 * 1024 * 1024;
+	int sz = 16 * 1024 * 1024;
 	int reserved_heap = 512*1024;
 	char* tmpp=NULL;
 	char* resv=NULL;
