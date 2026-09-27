@@ -49,6 +49,7 @@ __attribute__((weak)) void xlog(const char *fmt, ...) {
 
 static jmp_buf s_exit_jmp;
 static volatile int s_exit_requested = 0;
+static volatile int s_can_exit_jmp = 0;
 
 static retro_video_refresh_t video_cb = NULL;
 static retro_audio_sample_t audio_cb = NULL;
@@ -239,7 +240,9 @@ void gb300_poll_events(void) {
     if ((buttons & (PSP_CTRL_SELECT | PSP_CTRL_START)) == (PSP_CTRL_SELECT | PSP_CTRL_START)) {
         xlog("[PSPKVM-GB300] Exit hotkey (SELECT+START) pressed. Requesting graceful shutdown.\n");
         s_exit_requested = 1;
-        longjmp(s_exit_jmp, 1);
+        if (s_can_exit_jmp) {
+            longjmp(s_exit_jmp, 1);
+        }
     }
 
     /* 3. Output audio (22050 Hz / 60 fps ~= 368 frames) */
@@ -326,10 +329,13 @@ RETRO_API void retro_run(void) {
         gb300_hacker_log("KVM", "STARTING JAVATASK THREAD", 50);
 
         xlog("[PSPKVM-GB300] Entering JavaTask()...\n");
+        s_can_exit_jmp = 1;
         if (setjmp(s_exit_jmp) == 0) {
             JavaTask();
+            s_can_exit_jmp = 0;
             xlog("[PSPKVM-GB300] JavaTask() finished normally.\n");
         } else {
+            s_can_exit_jmp = 0;
             xlog("[PSPKVM-GB300] Returned from JavaTask() via hotkey exit.\n");
         }
 
@@ -337,10 +343,11 @@ RETRO_API void retro_run(void) {
             xlog("[PSPKVM-GB300] Triggering multicore shutdown_game()...\n");
             if (environ_cb) {
                 environ_cb(RETRO_ENVIRONMENT_SHUTDOWN, NULL);
-            }
+            } else {
 #if defined(SF2000) || defined(__mips__)
-            shutdown_game();
+                shutdown_game();
 #endif
+            }
             return;
         }
 
@@ -349,6 +356,10 @@ RETRO_API void retro_run(void) {
 
         if (environ_cb) {
             environ_cb(RETRO_ENVIRONMENT_SHUTDOWN, NULL);
+        } else {
+#if defined(SF2000) || defined(__mips__)
+            shutdown_game();
+#endif
         }
         return;
     }
