@@ -45,18 +45,18 @@ extern const unsigned char oopmap_Boundary[];
 extern const unsigned char omit_frame_table[];
 
 const unsigned char oopmap_Empty[]            = { 0 };
-const unsigned char oopmap_ConstantPool[]     = { 0 };
-const unsigned char oopmap_Method[]           = { 0 };
-const unsigned char oopmap_InstanceClass[]    = { 0 };
-const unsigned char oopmap_ArrayClass[]       = { 0 };
-const unsigned char oopmap_ObjNear[]          = { 0 };
-const unsigned char oopmap_FarClass[]         = { 0 };
+const unsigned char oopmap_ConstantPool[]     = { 2, 0 };
+const unsigned char oopmap_Method[]           = { 1, 1, 1, 0 };
+const unsigned char oopmap_InstanceClass[]    = { 3, 1, 1, 1, 1, 1, 1, 0 };
+const unsigned char oopmap_ArrayClass[]       = { 3, 1, 1, 1, 1, 1, 1, 0 };
+const unsigned char oopmap_ObjNear[]          = { 1, 0 };
+const unsigned char oopmap_FarClass[]         = { 3, 0 };
 const unsigned char oopmap_CompiledMethod[]   = { 0 };
-const unsigned char oopmap_EntryActivation[]  = { 0 };
-const unsigned char oopmap_ClassInfo[]        = { 0 };
+const unsigned char oopmap_EntryActivation[]  = { 2, 1, 0 };
+const unsigned char oopmap_ClassInfo[]        = { 3, 0 };
 const unsigned char oopmap_StackmapList[]     = { 0 };
-const unsigned char oopmap_TaskMirror[]       = { 0 };
-const unsigned char oopmap_Boundary[]         = { 0 };
+const unsigned char oopmap_TaskMirror[]       = { 1, 1, 1, 1, 1, 0 };
+const unsigned char oopmap_Boundary[]         = { 1, 0 };
 
 const unsigned char omit_frame_table[] = { 0 };
 

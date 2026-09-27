@@ -36,7 +36,7 @@ public abstract class FullCanvas extends Canvas
      */
     public void addCommand(Command cmd)
     {
-        addCommand(cmd);
+        super.addCommand(cmd);
     }
     
     /**
@@ -44,6 +44,6 @@ public abstract class FullCanvas extends Canvas
      */
     public void setCommandListener(CommandListener l)
     {
-        setCommandListener(l);
+        super.setCommandListener(l);
     }
 }

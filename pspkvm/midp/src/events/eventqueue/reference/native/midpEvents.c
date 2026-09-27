@@ -465,6 +465,12 @@ static int readNativeEventCommon(int isolateId) {
         return eventsPending;
     }
 
+    extern void xlog(const char *fmt, ...);
+    if (event.type == 1) { /* MIDP_KEY_EVENT */
+        xlog("[EVENT-SIGNAL] readNativeEventCommon: KEY isolate=%d type=%d p1(act)=%d p2(chr)=%d p4(disp)=%d pending=%d\n",
+             isolateId, event.type, event.intParam1, event.intParam2, event.intParam4, eventsPending);
+    }
+
     KNI_StartHandles(3);
     KNI_DeclareHandle(eventObj);
     KNI_DeclareHandle(stringObj);

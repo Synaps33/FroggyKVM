@@ -56,6 +56,20 @@ class ImageDataFactory implements AbstractImageDataFactory {
     };
 
     /**
+     * GIF87a Header Data
+     */
+    private static final byte[] gif87Header = new byte[] {
+         (byte)0x47, (byte)0x49, (byte)0x46, (byte)0x38, (byte)0x37, (byte)0x61
+    };
+
+    /**
+     * GIF89a Header Data
+     */
+    private static final byte[] gif89Header = new byte[] {
+         (byte)0x47, (byte)0x49, (byte)0x46, (byte)0x38, (byte)0x39, (byte)0x61
+    };
+
+    /**
      * RAW Header Data
      */
     private static final byte[] rawHeader = new byte[] {
@@ -622,6 +636,39 @@ class ImageDataFactory implements AbstractImageDataFactory {
     }
 
     /**
+     * Function to decode an <code>ImageData</code> from GIF data.
+     *
+     * @param imageData the <code>ImageData</code> to be populated
+     * @param imageBytes the array of image data in a supported image format
+     * @param imageOffset the offset of the start of the data in the array
+     * @param imageLength the length of the data in the array
+     */
+    private void decodeGIF(ImageData imageData,
+                           byte[] imageBytes,
+                           int imageOffset,
+                           int imageLength) {
+        if (imageLength < 10) {
+            throw new IllegalArgumentException();
+        }
+
+        int width = (imageBytes[imageOffset + 6] & 0x0ff) |
+                   ((imageBytes[imageOffset + 7] & 0x0ff) << 8);
+
+        int height = (imageBytes[imageOffset + 8] & 0x0ff) |
+                    ((imageBytes[imageOffset + 9] & 0x0ff) << 8);
+
+        if (width <= 0 || height <= 0) {
+            throw new IllegalArgumentException();
+        }
+
+        imageData.initImageData(width, height, false, true);
+
+        if (loadGIF(imageData, imageBytes, imageOffset, imageLength) == false) {
+            imageData.removeAlpha();
+        }
+    }
+
+    /**
      * Function to decode an <code>ImageData</code> from RAW data.
      *
      * @param imageData the <code>ImageData</code> to be populated
@@ -686,6 +733,12 @@ class ImageDataFactory implements AbstractImageDataFactory {
                                imageOffset, imageLength)) {
             // image type is JPEG
             decodeJPEG(imageData, imageBytes, imageOffset, imageLength);
+        } else if (headerMatch(gif87Header, imageBytes,
+                               imageOffset, imageLength) ||
+                   headerMatch(gif89Header, imageBytes,
+                               imageOffset, imageLength)) {
+            // image type is GIF
+            decodeGIF(imageData, imageBytes, imageOffset, imageLength);
         } else if (headerMatch(rawHeader, imageBytes,
                                imageOffset, imageLength)) {
             // image type is RAW
@@ -695,6 +748,21 @@ class ImageDataFactory implements AbstractImageDataFactory {
             throw new IllegalArgumentException();
         }
     }
+
+    /**
+     * Native function to load an <code>ImageData</code> from GIF data.
+     *
+     * @param imageData the <code>ImageData</code> to load to
+     * @param imageBytes the array of image data in a supported image format
+     * @param imageOffset the offset of the start of the data in the array
+     * @param imageLength the length of the data in the array
+     *
+     * @return true if there is alpha data
+     */
+    private native boolean loadGIF(ImageData imageData,
+                                   byte[] imageBytes,
+                                   int imageOffset,
+                                   int imageLength);
 
     /**
      * Native function to load an <code>ImageData</code> from PNG data.

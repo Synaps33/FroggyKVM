@@ -61,17 +61,13 @@ ReturnOop FileDecoder::read_completely(JVM_SINGLE_ARG_TRAPS) {
 
 ReturnOop FileDecoder::read_completely0(JVM_SINGLE_ARG_TRAPS) {
   UsingFastOops fast_oops;
-  tty->print_cr("[GB300-DEBUG] FileDecoder::read_completely0 entered, is_inflater=%d", is_inflater());
   JarFileParser::Fast jfp = get_jar_parser_if_needed(JVM_SINGLE_ARG_CHECK_0);
   (void)jfp;
   TypeArray::Fast result;
   if (is_inflater()) {
-    tty->print_cr("[GB300-DEBUG] FileDecoder::read_completely0 casting to Inflater and calling read_completely");
     result = ((Inflater*) this)->
              read_completely(JVM_SINGLE_ARG_NO_CHECK_AT_BOTTOM);
-    tty->print_cr("[GB300-DEBUG] FileDecoder::read_completely0 Inflater read_completely returned (null=%d)", result.is_null());
   } else {
-    tty->print_cr("[GB300-DEBUG] FileDecoder::read_completely0 STORED file processing");
     int size = file_size();
     result = Universe::new_byte_array_raw(size JVM_CHECK_0);
     int actual_bytes = get_bytes_raw(result().base_address(), size);

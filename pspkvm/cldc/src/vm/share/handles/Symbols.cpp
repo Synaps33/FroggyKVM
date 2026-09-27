@@ -46,10 +46,9 @@ static const SymbolDefinition definitions[] = {
 void Symbols::initialize(JVM_SINGLE_ARG_TRAPS) {
   UsingFastOops fast_oops;
   Symbol::Fast sym;
-  tty->print_cr("[GB300-DEBUG] Symbols::initialize -> starting loop for %d symbols", number_of_system_symbols());
+  // tty->print_cr("[GB300-DEBUG] Symbols::initialize -> starting loop for %d symbols", number_of_system_symbols());
   for (int i = 0; i < number_of_system_symbols(); i++) {
-    char* string = (char*)definitions[i].string;
-    tty->print_cr("[GB300-DEBUG] Symbols::initialize -> processing symbol %d: %s", i, string);
+    const char* string = definitions[i].string;
     if (definitions[i].is_signature) {
       sym = TypeSymbol::parse(string JVM_CHECK);
     } else {
@@ -57,7 +56,7 @@ void Symbols::initialize(JVM_SINGLE_ARG_TRAPS) {
     }
     *at(i) = sym;
   }
-  tty->print_cr("[GB300-DEBUG] Symbols::initialize -> loop finished");
+  // tty->print_cr("[GB300-DEBUG] Symbols::initialize -> loop finished");
 }
 
 void Symbols::oops_do(void do_oop(OopDesc**)) {

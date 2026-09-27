@@ -1,8 +1,150 @@
 #include "incls/_precompiled.incl"
 
+void oop_write_barrier(OopDesc** addr, OopDesc* value) {
+  OopDesc ** heap_start = _heap_start;
+  OopDesc ** old_generation_end = _old_generation_end;
+  *addr = value;
+
+  // Note the order of the comparison. In most cases the first comparison 
+  // will fail because addr is in the young space
+  if (addr < old_generation_end && ((OopDesc*)addr) < value && heap_start <= addr) {
+    ObjectHeap::set_bit_for(addr);
+    GUARANTEE(ObjectHeap::test_bit_for(addr), "sanity check");
+  }
+}
+
 void ObjectHeap::do_nothing(OopDesc** p) { (void)p; }
-void ObjectHeap::mark_pointer_to_young_generation(OopDesc** p) { (void)p; }
-void ObjectHeap::mark_root_and_stack(OopDesc** p) { (void)p; }
+void ObjectHeap::mark_pointer_to_young_generation(OopDesc** p) {
+  if (p < _collection_area_start) {
+    OopDesc** const obj = (OopDesc**)*p;
+    if (_collection_area_start <= obj && obj < _inline_allocation_top) {
+      set_bit_for(p);
+    }
+  }
+}
+
+void ObjectHeap::mark_root_and_stack(OopDesc** p) {
+  OopDesc** const obj = (OopDesc**) *p;
+  if (_collection_area_start <= obj && obj < mark_area_end()
+      && !test_and_set_bit_for(obj)) {
+    *_marking_stack_top++ = (OopDesc*)obj;
+    continue_marking();
+  }
+}
+
+void ObjectHeap::mark_and_push(OopDesc** p) {
+  OopDesc* obj = *p;
+  if (_collection_area_start <= (OopDesc**)obj &&
+      (OopDesc**)obj < mark_area_end()) {
+    if (!test_and_set_bit_for((OopDesc**)obj)) {
+      if (_marking_stack_top == _marking_stack_end) {
+        _marking_stack_overflow = true;
+      } else {
+        *_marking_stack_top++ = obj;
+      }
+    }
+  }
+}
+
+void ObjectHeap::continue_marking(void) {
+  OopDesc** const collection_area_start = _collection_area_start;
+  OopDesc** const heap_top              = mark_area_end();
+  OopDesc** const marking_stack_end     = _marking_stack_end;
+  address   const bitvector_base        = _bitvector_base;
+
+  while (_marking_stack_top > _marking_stack_start) {
+    OopDesc* obj = *--_marking_stack_top;
+    mark_and_push(&(obj->_klass));
+
+    FarClassDesc* const blueprint = obj->blueprint();
+    if (blueprint->instance_size_as_jint() > 0) {
+      const jbyte* map = (jbyte*)blueprint->embedded_oop_map();
+      OopDesc** p = (OopDesc**)obj;
+      for (;;) {
+        const jint entry = (jint)(*map++);
+        if (entry > 0) {
+          p += entry;
+          OopDesc** const o = (OopDesc**)*p;
+          if (collection_area_start <= o && o < heap_top) {
+            if (!test_and_set_bit_for(o, bitvector_base)) {
+              if (_marking_stack_top == marking_stack_end) {
+                _marking_stack_overflow = true;
+              } else {
+                *_marking_stack_top++ = (OopDesc*)o;
+              }
+            }
+          }
+        } else if (entry == 0) {
+          break;
+        } else {
+          GUARANTEE((entry & 0xff) == OopMapEscape, "sanity")
+          p += (OopMapEscape - 1);
+        }
+      }
+    } else {
+      obj->oops_do_for(blueprint, mark_and_push);
+    }
+  }
+}
+
+#if ENABLE_ISOLATES
+void TaskMirrorDesc::variable_oops_do(void do_oop(OopDesc **)) {
+  if (_object_size == header_size()) {
+    return;
+  }
+  if (_containing_class != NULL) {
+    jubyte *map = _containing_class->embedded_oop_map();
+    while (*map++ != OopMapSentinel) {}
+    if (*map != OopMapSentinel) {
+      map_oops_do(map, do_oop);
+    }
+  }
+}
+#endif
+
+void ConstantPoolDesc::variable_oops_do(void do_oop(OopDesc**)) {
+  if (_tags == NULL) {
+    return;
+  }
+  OopDesc** base = (OopDesc**)((jubyte*)this + header_size());
+  jubyte* tags = (jubyte*)_tags + sizeof(ArrayDesc);
+  for (int i = 0; i < _length; i++) {
+    jubyte tag = *tags++;
+    if (ConstantTag::is_oop(tag)) {
+      GUARANTEE(*base != NULL, "constant pool cannot contain null entries");
+      do_oop(base);
+    }
+    base++;
+  }
+}
+
+#if !ENABLE_ISOLATES 
+void InstanceClassDesc::variable_oops_do(void do_oop(OopDesc**)) {
+  jubyte* map = embedded_oop_map();
+  while (*map++ != OopMapSentinel) {};
+  map_oops_do(map, do_oop);
+}
+#else
+typedef void dummy_instance_class_function(OopDesc**);
+void InstanceClassDesc::variable_oops_do(dummy_instance_class_function) {
+}
+#endif
+
+void MixedOopDesc::variable_oops_do(void do_oop(OopDesc**)) {
+  OopDesc** addr = obj_field_addr(sizeof(MixedOopDesc));
+  for (int i=0; i<_pointer_count; i++) {
+    do_oop(addr);
+    addr ++;
+  }
+}
+
+void EntryActivationDesc::variable_oops_do(void do_oop(OopDesc**)) {
+  for (int i = 0; i < _length; i++) {
+    if (tag_at(i) == obj_tag) {
+      do_oop(pointer_to_value_at(i));
+    }
+  }
+}
 
 void ConstantPool::resolve_helper_0(int index, Symbol* name, Symbol* signature,
                                     InstanceClass* klass, Symbol* klass_name
@@ -168,11 +310,137 @@ int VerifierFrame::get_stackmap_index_for_offset(int target_bci) {
   return -1;
 }
 
-void OopDesc::oops_do_for(const FarClassDesc* f, void (*fn)(OopDesc**)) { (void)f; (void)fn; }
-void ObjectHeap::continue_marking() {}
+void OopDesc::oops_do_for(const FarClassDesc* blueprint, void do_oop(OopDesc**)) {
+  jint instance_size = blueprint->instance_size_as_jint();
+  switch(instance_size) {
+  default:
+    GUARANTEE(instance_size > 0, "bad instance size");
+    map_oops_do(blueprint->embedded_oop_map(), do_oop);
+    return;
+    
+  case InstanceSize::size_type_array_1:
+  case InstanceSize::size_type_array_2:
+  case InstanceSize::size_type_array_4:
+  case InstanceSize::size_type_array_8:
+  case InstanceSize::size_generic_near:
+  case InstanceSize::size_symbol:
+    GUARANTEE(blueprint->extern_oop_map()[0] == OopMapSentinel, 
+              "No fixed pointers");
+    return;
+    
+  case InstanceSize::size_far_class:
+  case InstanceSize::size_obj_near: 
+  case InstanceSize::size_java_near:
+  case InstanceSize::size_boundary:
+  case InstanceSize::size_method:
+    break;
+
+  case InstanceSize::size_obj_array_class:
+  case InstanceSize::size_type_array_class: 
+    break;
+    
+  case InstanceSize::size_execution_stack:
+    ((ExecutionStackDesc*) this)->variable_oops_do(do_oop); 
+    GUARANTEE(blueprint->extern_oop_map()[0] == OopMapSentinel, 
+              "No fixed pointers");
+    return;
+
+  case InstanceSize::size_obj_array:
+    ((ObjArrayDesc*) this)->variable_oops_do(do_oop); 
+    GUARANTEE(blueprint->extern_oop_map()[0] == OopMapSentinel, 
+              "No fixed pointers");
+    return;
+
+  case InstanceSize::size_refnode:
+#if ENABLE_JAVA_DEBUGGER
+    ((RefNodeDesc *) this)->variable_oops_do(do_oop); 
+    GUARANTEE(blueprint->extern_oop_map()[0] == OopMapSentinel, 
+              "No fixed pointers");
+#endif
+    return;
+
+  case InstanceSize::size_mixed_oop:
+    ((MixedOopDesc*) this)->variable_oops_do(do_oop); 
+    break;
+#if USE_COMPILER_STRUCTURES
+  case InstanceSize::size_compiled_method:
+    ((CompiledMethodDesc*) this)->variable_oops_do(do_oop); 
+    break;
+#endif
+  case InstanceSize::size_constant_pool: 
+    ((ConstantPoolDesc*) this)->variable_oops_do(do_oop);  
+    break;
+  case InstanceSize::size_entry_activation:  
+    ((EntryActivationDesc*)this)->variable_oops_do(do_oop);
+    break;
+  case InstanceSize::size_instance_class:
+    ((InstanceClassDesc*) this)->variable_oops_do(do_oop);
+    break;
+  case InstanceSize::size_class_info:
+    ((ClassInfoDesc*) this)->variable_oops_do(do_oop);  
+    break;
+  case InstanceSize::size_stackmap_list:
+    ((StackmapListDesc*) this)->variable_oops_do(do_oop);  
+    break;
+#if ENABLE_ISOLATES
+  case InstanceSize::size_task_mirror:
+    ((TaskMirrorDesc*) this)->variable_oops_do(do_oop);  
+    break;
+#endif
+  } 
+  map_oops_do(blueprint->extern_oop_map(), do_oop);
+}
 
 ConstantTag ConstantPool::tag_at(int index) const  {
   TypeArray::Raw ta = tags();
   jubyte* ptr = (jubyte*)ta().base_address();
   return ConstantTag(ptr[index]);
 }
+
+#include <midpServices.h>
+#include <midp_thread.h>
+
+extern "C" {
+jint Java_com_sun_midp_io_j2me_push_ConnectionRegistry_poll0() {
+  midp_thread_wait(PUSH_SIGNAL, 0, 0);
+  return -1;
+}
+
+jint Java_com_sun_midp_io_j2me_push_ConnectionRegistry_getEntry0() {
+  return -1;
+}
+
+jint Java_com_sun_midp_io_j2me_push_ConnectionRegistry_getMIDlet0() {
+  return -1;
+}
+
+jint Java_com_sun_midp_io_j2me_push_ConnectionRegistry_list0() {
+  return -1;
+}
+
+jint Java_com_sun_midp_io_j2me_push_ConnectionRegistry_del0() {
+  return -1;
+}
+
+jint Java_com_sun_midp_io_j2me_push_ConnectionRegistry_add0() {
+  return -1;
+}
+
+jlong Java_com_sun_midp_io_j2me_push_ConnectionRegistry_addAlarm0() {
+  return 0;
+}
+
+jint Java_com_sun_midp_io_j2me_push_ConnectionRegistry_checkInByName0() {
+  return -1;
+}
+
+void Java_com_sun_midp_io_j2me_push_ConnectionRegistry_checkInByHandle0() {
+}
+
+void Java_com_sun_midp_io_j2me_push_ConnectionRegistry_checkInByMidlet0() {
+}
+
+void Java_com_sun_midp_io_j2me_push_ConnectionRegistry_delAllForSuite0() {
+}
+}
+

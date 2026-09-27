@@ -637,8 +637,8 @@ ReturnOop InstanceClass::find_method(ObjArray* class_methods, Symbol* name,
                                      Symbol* signature, bool non_static_only) {
   AllocationDisabler raw_pointers_used_in_this_function;
 
-  OopDesc *name_obj = name->obj();
-  OopDesc *sig_obj = signature->obj();
+  OopDesc *name_obj = name ? name->obj() : NULL;
+  OopDesc *sig_obj = signature ? signature->obj() : NULL;
   MethodDesc **ptr = (MethodDesc**)class_methods->base_address();
   MethodDesc **end = ptr + class_methods->length();
 

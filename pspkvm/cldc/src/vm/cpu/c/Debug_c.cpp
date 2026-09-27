@@ -25,7 +25,9 @@
  */
 
 # include "incls/_precompiled.incl"
+#if !USE_PRECOMPILED_HEADER
 # include "incls/_Debug_c.cpp.incl"
+#endif
 
 #if !defined(PRODUCT) || ENABLE_TTY_TRACE
 

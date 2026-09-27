@@ -122,7 +122,9 @@ public class ResourceInputStream extends InputStream {
     	     buf = null;
     	 } catch (OutOfMemoryError oome) {
     	     buf = null;
-    	     System.out.println("Out of memory, no buffer created:"+Runtime.getRuntime().freeMemory());
+    	     StringBuffer sb = new StringBuffer();
+    	     sb.append("Out of memory, no buffer created:").append(Runtime.getRuntime().freeMemory());
+    	     System.out.println(sb.toString());
     	 }
         return buf;    	 
     }
@@ -136,7 +138,9 @@ public class ResourceInputStream extends InputStream {
      */
     public ResourceInputStream(String name) throws IOException {
         String fixedName = fixResourceName(name);
-        System.out.println("ResourceInputStream("+name+")");
+        StringBuffer sb = new StringBuffer();
+        sb.append("ResourceInputStream(").append(name).append(')');
+        System.out.println(sb.toString());
         if (bufferCache == null) {
             bufferCache = new Hashtable();
         }
@@ -313,11 +317,17 @@ public class ResourceInputStream extends InputStream {
     public long skip(long n) throws IOException
     {
         if (buffer != null) {            
-            pos += n;
-            if (pos >= buffer.length) {
-                n = buffer.length - pos;
-                pos = buffer.length;
+            if (n <= 0) {
+                return 0;
             }
+            int available = buffer.length - pos;
+            if (available <= 0) {
+                return 0;
+            }
+            if (n > (long)available) {
+                n = (long)available;
+            }
+            pos += (int)n;
             return n;
         }
         

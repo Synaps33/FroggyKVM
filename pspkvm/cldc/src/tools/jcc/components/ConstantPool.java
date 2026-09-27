@@ -32,10 +32,10 @@ import java.util.Vector;
 import java.util.Enumeration;
 import java.io.IOException;
 import java.io.PrintStream;
-import sun.misc.Compare;
+// import sun.misc.Compare;
 
 public 
-class ConstantPool implements Compare {
+class ConstantPool {
 
     protected Hashtable	h;	// for "quick" lookup
     protected Vector	t;	// for enumeration in order
@@ -83,7 +83,7 @@ class ConstantPool implements Compare {
 
 	// Sorting the ConstantObject with descending reference
 	// count.	
-	sun.misc.Sort.quicksort(arr, this);
+	java.util.Arrays.sort(arr, (o1, o2) -> doCompare(o1, o2));
 
 	t.removeAllElements();
 	t.addElement(null);

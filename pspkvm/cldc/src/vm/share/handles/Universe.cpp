@@ -34,6 +34,7 @@ int  Universe::_compilation_abstinence_ticks = 0;
 bool Universe::_is_bootstrapping  = true;
 bool Universe::_before_main       = true;
 bool Universe::_is_stopping       = false;
+extern "C" void gb300_hacker_log(const char *tag, const char *msg, int pct);
 
 #if ENABLE_JVMPI_PROFILE
 jint Universe::_number_of_java_methods = 0;
@@ -539,44 +540,37 @@ bool Universe::bootstrap(const JvmPathChar* classpath) {
 
 
   ObjectHeap::initialize();
-  tty->print_cr("[GB300-DEBUG] Universe::bootstrap -> after ObjectHeap::initialize");
   JarFileParser::initialize();
-  tty->print_cr("[GB300-DEBUG] Universe::bootstrap -> after JarFileParser::initialize");
 
   ROM::initialize(classpath);
-  tty->print_cr("[GB300-DEBUG] Universe::bootstrap -> after ROM::initialize");
   if (!UseROM && HeapMin < 200 * 1024) {
     // We need a pretty big heap to load the bootstrap classes.
     HeapMin = 200 * 1024;
   }
   if (!ObjectHeap::create()) {
-    tty->print_cr("[GB300-DEBUG] Universe::bootstrap -> ObjectHeap::create failed");
     return false;
   }
-  tty->print_cr("[GB300-DEBUG] Universe::bootstrap -> after ObjectHeap::create");
 #if ENABLE_TRAMPOLINE && !CROSS_GENERATOR
   BranchTable::init();
 #endif
   if (!Scheduler::initialize()) {
-    tty->print_cr("[GB300-DEBUG] Universe::bootstrap -> Scheduler::initialize failed");
     return false;
   }
-  tty->print_cr("[GB300-DEBUG] Universe::bootstrap -> after Scheduler::initialize");
 
   if (UseROM) {
-    tty->print_cr("[GB300-DEBUG] Universe::bootstrap -> calling bootstrap_with_rom");
+    tty->print_cr("[PSPKVM] Universe::bootstrap -> calling bootstrap_with_rom");
     if (!bootstrap_with_rom(classpath)) {
-      tty->print_cr("[GB300-DEBUG] Universe::bootstrap -> bootstrap_with_rom failed");
+      tty->print_cr("[PSPKVM] Universe::bootstrap -> bootstrap_with_rom failed");
       return false;
     }
-    tty->print_cr("[GB300-DEBUG] Universe::bootstrap -> after bootstrap_with_rom");
+    tty->print_cr("[PSPKVM] Universe::bootstrap -> after bootstrap_with_rom");
   } else {
-    tty->print_cr("[GB300-DEBUG] Universe::bootstrap -> calling bootstrap_without_rom");
+    tty->print_cr("[PSPKVM] Universe::bootstrap -> calling bootstrap_without_rom");
     if (!bootstrap_without_rom(classpath)) {
-      tty->print_cr("[GB300-DEBUG] Universe::bootstrap -> bootstrap_without_rom failed");
+      tty->print_cr("[PSPKVM] Universe::bootstrap -> bootstrap_without_rom failed");
       return false;
     }
-    tty->print_cr("[GB300-DEBUG] Universe::bootstrap -> after bootstrap_without_rom");
+    tty->print_cr("[PSPKVM] Universe::bootstrap -> after bootstrap_without_rom");
   }
 
   SETUP_ERROR_CHECKER_ARG;
@@ -859,10 +853,10 @@ bool Universe::bootstrap_without_rom(const JvmPathChar* classpath) {
   ObjectHeap::on_task_switch(Task::FIRST_TASK);
   _current_task = Task::get_task(Task::FIRST_TASK);
 #endif
-  tty->print_cr("[GB300-DEBUG] Universe::bootstrap_without_rom -> calling create_first_task");
+  tty->print_cr("[PSPKVM] Universe::bootstrap_without_rom -> calling create_first_task");
   create_first_task(classpath JVM_CHECK_0);
 
-  tty->print_cr("[GB300-DEBUG] Universe::bootstrap_without_rom -> calling setup_thread_priority_list");
+  tty->print_cr("[PSPKVM] Universe::bootstrap_without_rom -> calling setup_thread_priority_list");
   setup_thread_priority_list(JVM_SINGLE_ARG_CHECK_0);
 
   {
@@ -875,7 +869,7 @@ bool Universe::bootstrap_without_rom(const JvmPathChar* classpath) {
     }
   }
 
-  tty->print_cr("[GB300-DEBUG] Universe::bootstrap_without_rom -> calling update_relative_pointers");
+  tty->print_cr("[PSPKVM] Universe::bootstrap_without_rom -> calling update_relative_pointers");
   update_relative_pointers();
 
 #if ENABLE_COMPILER_TYPE_INFO
@@ -1027,7 +1021,6 @@ bool Universe::bootstrap_without_rom(const JvmPathChar* classpath) {
   char_array_class()->get_array_class(2 JVM_CHECK_0);
   load_root_class(isolate_class(), Symbols::com_sun_cldc_isolate_Isolate());  
   Task::init_first_task(JVM_SINGLE_ARG_CHECK_0);
-  Task::setup_mirrors(JVM_SINGLE_ARG_CHECK_0);
 #else
   setup_mirrors(JVM_SINGLE_ARG_CHECK_0);
   // Fixed initialization order for Object, Thread & Class
@@ -1067,6 +1060,7 @@ bool Universe::bootstrap_without_rom(const JvmPathChar* classpath) {
     ObjectHeap::verify();
   }
   _before_main = false;
+  tty->print_cr("[PSPKVM] Universe::bootstrap_without_rom COMPLETED SUCCESSFULLY!");
 
   *inlined_stackmaps() = new_stackmap_list(1 JVM_CHECK_0);
   inlined_stackmaps()->set_short_map(0, 0);
@@ -2278,46 +2272,56 @@ void Universe::init_task_list(JVM_SINGLE_ARG_TRAPS) {
 
 void Universe::create_first_task(const JvmPathChar* classpath JVM_TRAPS) {
   UsingFastOops fast_oops;
-  tty->print_cr("[GB300-DEBUG] create_first_task STEP-A ENABLE_ISOLATES=%d", (int)ENABLE_ISOLATES);
 
 #if ENABLE_ISOLATES  
-  tty->print_cr("[GB300-DEBUG] create_first_task STEP-B (isolates path)");
   Task::Fast task = Task::allocate_task(Task::FIRST_TASK JVM_CHECK);
-  tty->print_cr("[GB300-DEBUG] create_first_task STEP-C allocate_task done");
   task().add_thread();
-  tty->print_cr("[GB300-DEBUG] create_first_task STEP-D add_thread done");
   Thread::current()->set_task_id(Task::FIRST_TASK);
-  tty->print_cr("[GB300-DEBUG] create_first_task STEP-E set_task_id done");
   ObjectHeap::set_task_memory_reserve_limit(Task::FIRST_TASK,
                                             ReservedMemory, TotalMemory);
-  tty->print_cr("[GB300-DEBUG] create_first_task STEP-F reserve_limit done");
-#else
-  tty->print_cr("[GB300-DEBUG] create_first_task STEP-B2 (NO isolates path)");
 #endif
   
-  tty->print_cr("[GB300-DEBUG] create_first_task STEP-G before set_current_task");
   set_current_task(Task::FIRST_TASK);
-  tty->print_cr("[GB300-DEBUG] create_first_task STEP-H after set_current_task");
   TypeArray::Fast path = FilePath::convert_to_unicode(
     classpath, fn_strlen(classpath) JVM_CHECK);
-  tty->print_cr("[GB300-DEBUG] create_first_task STEP-I after convert_to_unicode");
   ObjArray::Raw cp = setup_classpath(&path JVM_CHECK);
-  tty->print_cr("[GB300-DEBUG] create_first_task STEP-J after setup_classpath");
   Task::current()->set_app_classpath(cp());
   
-  const JvmPathChar sys_cp_str[] = {
-      '/', 'm', 'n', 't', '/', 's', 'd', 'a', '1', '/', 'b', 'i', 'o', 's', '/', 'c', 'l', 'a', 's', 's', 'e', 's', '.', 'z', 'i', 'p',
-      ';',
-      '/', 'm', 'n', 't', '/', 's', 'd', 'a', '1', '/', 'R', 'O', 'M', 'S', '/', 'J', '2', 'M', 'E', '/', 'c', 'l', 'a', 's', 's', 'e', 's', '.', 'z', 'i', 'p',
-      ';',
-      '/', 'm', 'n', 't', '/', 's', 'd', 'a', '1', '/', 'R', 'O', 'M', 'S', '/', 'j', '2', 'm', 'e', '/', 'c', 'l', 'a', 's', 's', 'e', 's', '.', 'z', 'i', 'p',
-      0
-  };
-  TypeArray::Fast sys_path = FilePath::convert_to_unicode(sys_cp_str, fn_strlen(sys_cp_str) JVM_CHECK);
+  static const char* sys_cp_ascii = NULL;
+  if (!sys_cp_ascii) {
+    static const char* const candidates[] = {
+        "/mnt/sda1/bios/classes.zip",
+        "/mnt/sda1/BIOS/classes.zip",
+        "/home/Sajnaps/gb300/bios/classes.zip",
+        "/home/Sajnaps/gb300/froggykvm/classes.zip",
+        "/mnt/sda1/cores/j2me/classes.zip",
+        "bios/classes.zip",
+        "classes.zip",
+        "/mnt/sda1/ROMS/J2ME/classes.zip",
+        "/mnt/sda1/ROMS/j2me/classes.zip",
+        "/media/Sajnaps/GB300/bios/classes.zip",
+        "/media/Sajnaps/GB300/cores/j2me/classes.zip",
+        NULL
+    };
+    for (int i = 0; candidates[i] != NULL; i++) {
+        FILE *test_f = fopen(candidates[i], "rb");
+        if (test_f) {
+            fclose(test_f);
+            sys_cp_ascii = candidates[i];
+            break;
+        }
+    }
+    if (!sys_cp_ascii) sys_cp_ascii = "/mnt/sda1/bios/classes.zip";
+  }
+  int cp_len = (int)strlen(sys_cp_ascii);
+  JvmPathChar sys_cp_unicode[512];
+  for (int ci = 0; ci < cp_len && ci < 511; ci++) sys_cp_unicode[ci] = (JvmPathChar)sys_cp_ascii[ci];
+  sys_cp_unicode[cp_len < 511 ? cp_len : 511] = 0;
+  TypeArray::Fast sys_path = FilePath::convert_to_unicode(sys_cp_unicode, cp_len JVM_CHECK);
   ObjArray::Raw sys_cp = setup_classpath(&sys_path JVM_CHECK);
   Task::current()->set_sys_classpath(sys_cp());
-  
-  tty->print_cr("[GB300-DEBUG] create_first_task STEP-K done");
+
+  gb300_hacker_log("SYS", "LINK CLDC classes.zip", 48);
 }
 
 #if ENABLE_ISOLATES

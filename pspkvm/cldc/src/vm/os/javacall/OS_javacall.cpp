@@ -39,6 +39,8 @@
 
 #include <javacall_time.h>
 
+extern "C" void gb300_jvm_yield(void);
+
 static bool             ticker_stopping = false;
 static bool             ticker_running = false;
 static int              sock_initialized = 0;
@@ -73,7 +75,7 @@ jlong Os::java_time_millis() {
 }
 
 void Os::sleep(jlong ms) {
-  /* let the current process sleep for ms seconds */
+  gb300_jvm_yield();
 }
 
 static void tick_timer_func(javacall_handle handle) {

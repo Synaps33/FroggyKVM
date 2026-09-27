@@ -142,5 +142,9 @@ public class DirectGraphicsImpl
     public void setARGBColor(int argbColor)
     {
     	graphics.setColor(argbColor);
+        int alpha = (argbColor >>> 24) & 0xFF;
+        if (alpha < 64) {
+            graphics.setClip(0, 0, 0, 0);
+        }
     }
 }

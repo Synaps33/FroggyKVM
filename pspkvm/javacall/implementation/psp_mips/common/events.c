@@ -28,6 +28,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+extern void gb300_jvm_yield(void);
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -88,6 +90,13 @@ javacall_result javacall_event_receive(
        busy_count = 0;
        to = timeTowaitInMillisec * 1000;
        ret = sceKernelReceiveMbxCB(_psp_mailboxID[_mbxid_recv], &msg, &to);
+    }
+
+    /* Single-threaded GB300 yield: if no event and waiting was requested, yield to frontend */
+    if (ret != 0 && timeTowaitInMillisec != 0) {
+        gb300_jvm_yield();
+        /* Re-check mailbox now that frontend has polled inputs */
+        ret = sceKernelReceiveMbxCB(_psp_mailboxID[_mbxid_recv], &msg, NULL);
     }
 
     

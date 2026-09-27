@@ -168,47 +168,27 @@ void TaskGCContextDebug::dispose() {
 #endif
 
 void TaskContext::set_current_task(int task_id) {
-  tty->print_cr("[GB300-DEBUG] set_current_task before refresh: task_list()=0x%x, _raw_task_list=0x%x",
-     (unsigned int)Universe::task_list()->obj(), (unsigned int)Universe::_raw_task_list);
   // Re-sync _raw_task_list with the GC-maintained handle.
   // This function is never called from within GC traversal, so task_list()
   // is valid here. GC may have moved the task list array between the last
   // refresh and this call (e.g. during add_thread()), so we refresh now,
   // right before task_from_id().
   Universe::refresh_raw_task_list();
-  
-  tty->print_cr("[GB300-DEBUG] set_current_task after refresh: _raw_task_list=0x%x, obj_at(%d)=0x%x",
-     (unsigned int)Universe::_raw_task_list, task_id, (unsigned int)Universe::task_list()->obj_at(task_id));
-
-  tty->print_cr("[TSC-DEBUG] set_current_task S1 task_id=%d prev=%d",
-                task_id, _global_context._current_task_id);
-
 
   Task::Raw task = Universe::task_from_id(task_id);
-  tty->print_cr("[TSC-DEBUG] set_current_task S2 task=0x%x", (unsigned int)task.obj());
   *Universe::current_task_obj() = task.obj();
-  tty->print_cr("[TSC-DEBUG] set_current_task S3");
 
   if (task_id != _global_context._current_task_id) {
-    tty->print_cr("[TSC-DEBUG] set_current_task S4 switching task");
     Task::Raw prev_task = Universe::task_from_id(_global_context._current_task_id);
-    tty->print_cr("[TSC-DEBUG] set_current_task S5 prev_task=0x%x", (unsigned int)prev_task.obj());
     if (prev_task.not_null()) {
       prev_task().set_class_count(_global_context._number_of_java_classes);
     }
-    tty->print_cr("[TSC-DEBUG] set_current_task S6 setting class_list");
     *Universe::class_list()         = task().class_list();
-    tty->print_cr("[TSC-DEBUG] set_current_task S7 setting mirror_list");
     *Universe::mirror_list()        = task().mirror_list();
-    tty->print_cr("[TSC-DEBUG] set_current_task S8 setting dictionary");
     *Universe::current_dictionary() = task().dictionary();
-    tty->print_cr("[TSC-DEBUG] set_current_task S9 setting string_table");
     *StringTable::current()         = task().string_table();
-    tty->print_cr("[TSC-DEBUG] set_current_task S10 setting symbol_table");
     *SymbolTable::current()         = task().symbol_table();
-    tty->print_cr("[TSC-DEBUG] set_current_task S11 setting global_refs");
     *RefArray::current()            = task().global_references();
-    tty->print_cr("[TSC-DEBUG] set_current_task S12");
     _global_context._number_of_java_classes = task().class_count();
     _current_task = task.obj();
     _global_context._current_task_id = task_id;
@@ -216,15 +196,11 @@ void TaskContext::set_current_task(int task_id) {
     ROM::on_task_switch(task_id);
 #endif
   }
-  tty->print_cr("[TSC-DEBUG] set_current_task S13 GUARANTEE check");
   GUARANTEE(task.not_null(), "task must be alive");
-  tty->print_cr("[TSC-DEBUG] set_current_task S14 mirror_list=0x%x", (unsigned int)task().mirror_list());
   _mirror_list_base = (address)task().mirror_list();
   _mirror_list_base += ObjArray::base_offset();
-  tty->print_cr("[TSC-DEBUG] set_current_task S15 class_list=0x%x", (unsigned int)task().class_list());
   _class_list_base = (address)task().class_list();
   _class_list_base += ObjArray::base_offset();
-  tty->print_cr("[TSC-DEBUG] set_current_task S16 done");
 #if USE_LARGE_OBJECT_AREA
   GUARANTEE(!LargeObject::contains((LargeObject*)_mirror_list_base),
             "Mirror list points into LargeObject area");

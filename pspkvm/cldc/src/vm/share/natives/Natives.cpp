@@ -1753,3 +1753,6 @@ extern "C" void trace_native_call() {
 }
 #endif
 
+extern "C" void dump_java_stack(void) {
+}
+

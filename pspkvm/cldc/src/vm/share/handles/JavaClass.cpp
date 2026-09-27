@@ -135,21 +135,18 @@ ReturnOop JavaClass::array_class() {
   }
   // get task mirror for this class
   TaskMirror::Raw tm = task_mirror_no_check();
-  
-  tty->print_cr("[GB300-DEBUG] array_class() called for class_id=%d, tm.obj=0x%x", class_id(), tm.obj());
 
   // get task mirror for array class that has elements of *this* class
   if (is_being_initialized_mirror(&tm)) {
     // return real array class
     // class is being initialized.
     tm = TaskMirror::clinit_list_lookup(this);
-    tty->print_cr("[GB300-DEBUG] array_class() clinit_list_lookup returned tm.obj=0x%x", tm.obj());
     if (tm.is_null()) {
       return NULL;
     }
   }
   if (tm.is_null()) {
-    tty->print_cr("[GB300-DEBUG] array_class() tm is NULL! About to crash.");
+    return NULL;
   }
   return tm().array_class();
 }
@@ -203,7 +200,6 @@ ReturnOop JavaClass::get_array_class(jint distance JVM_TRAPS) {
   ObjArrayClass::Fast ac = self().array_class();
   ObjArrayClass::Fast tmp;
   if (ac.is_null()) {
-    tty->print_cr("[GB300-DEBUG] get_array_class: ac is null for class_id=%d, distance=%d", self().class_id(), distance);
 #if ENABLE_ISOLATES
     // THe logic is as follows, if generating the System ROM then don't create
     // TaskMirrors for arrayclasses as the arrayclass and element class
@@ -216,16 +212,11 @@ ReturnOop JavaClass::get_array_class(jint distance JVM_TRAPS) {
     // not in ROM then we don't need TaskMirror
     if (!(GenerateROMImage && !ENABLE_MONET) &&
         (!UseROM || (self().class_id() < ROM::number_of_system_classes())))  {
-      tty->print_cr("[GB300-DEBUG] get_array_class: entering ISOLATES setup_task_mirror block");
       TaskMirror::Raw tm = self().task_mirror_no_check();
       if (self().is_being_initialized_mirror(&tm)) {
-        tty->print_cr("[GB300-DEBUG] get_array_class: is_being_initialized, is_instance=%d", self().is_instance_class());
         if (self().is_instance_class()) {
-          tty->print_cr("[GB300-DEBUG] get_array_class: calling setup_task_mirror sfsize=%d vtlen=%d",
-                        self().static_field_size(), self().vtable_length());
           tm = self().setup_task_mirror(self().static_field_size(), self().vtable_length(),
                                  true JVM_CHECK_0);
-          tty->print_cr("[GB300-DEBUG] get_array_class: setup_task_mirror returned, tm.not_null=%d", tm.not_null());
           // setup_task_mirror returns null during bootstrap (before
           // java.lang.Class is loaded). Only call initialize_static_fields
           // if we have a real task mirror; bootstrap fake classes have no
@@ -235,18 +226,13 @@ ReturnOop JavaClass::get_array_class(jint distance JVM_TRAPS) {
             ic().initialize_static_fields(&tm);
           }
         } else {
-          tty->print_cr("[GB300-DEBUG] get_array_class: non-instance, calling setup_task_mirror(0,0)");
           tm = self().setup_task_mirror(0, 0, false JVM_CHECK_0);
-          tty->print_cr("[GB300-DEBUG] get_array_class: setup_task_mirror(0,0) returned");
         }
       }
     }
 #endif
-    tty->print_cr("[GB300-DEBUG] get_array_class: calling new_obj_array_class");
-    ac = Universe::new_obj_array_class((JavaClass*)self.obj() JVM_CHECK_0);
-    tty->print_cr("[GB300-DEBUG] get_array_class: new_obj_array_class returned, calling set_array_class");
+    ac = Universe::new_obj_array_class(&self JVM_CHECK_0);
     self().set_array_class(&ac JVM_CHECK_0);
-    tty->print_cr("[GB300-DEBUG] get_array_class: set_array_class done");
     if (_debugger_active) {
       // With fixes to ClassBySig in VMImpl.cpp we don't need to do this
       //      VMEvent::class_prepare_event(&ac);

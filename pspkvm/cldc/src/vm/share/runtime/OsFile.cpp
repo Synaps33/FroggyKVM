@@ -125,20 +125,16 @@ bool OsFile_exists(const JvmPathChar *filename) {
   pcsl_string pcsl_filename = PCSL_STRING_NULL;
 
   GUARANTEE(sizeof(jchar) == sizeof(JvmPathChar), "Types must match");
-  tty->print_cr("[GB300-DEBUG] OsFile_exists converting path with length %d", name_len);
 
   if (pcsl_string_convert_from_utf16(filename, 
                                      name_len, 
                                      &pcsl_filename) != PCSL_STRING_OK) {
-    tty->print_cr("[GB300-DEBUG] OsFile_exists failed to convert path!");
     return false;
   }
 
-  tty->print_cr("[GB300-DEBUG] OsFile_exists calling pcsl_file_exist");
   jboolean result = pcsl_file_exist(&pcsl_filename);
   pcsl_string_free(&pcsl_filename);
 
-  tty->print_cr("[GB300-DEBUG] OsFile_exists result: %d", result);
   return result;
 }
 

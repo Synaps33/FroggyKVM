@@ -1,9 +1,19 @@
 # Build artifacts
 *.o
 *.a
+*.so
 *.elf
 *.map
-core_87000000
+core_87000000*
+classes.zip*
+*.bak
+
+# Test runners
+test_j2me_runner*
+test_meta_tool*
+
+# Secrets & local config
+*github*.txt
 
 # IDE
 .vscode/
@@ -21,4 +31,5 @@ Thumbs.db
 *.zip
 *.tar.*
 msys64/
+
 

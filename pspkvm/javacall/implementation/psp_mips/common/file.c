@@ -104,8 +104,6 @@ javacall_result javacall_file_open(const javacall_utf16 * unicodeFileName, int f
     nativeFlags |= flags & 0x03;
 
     int fd = open(pszOsFilename, nativeFlags, creationMode);
-    
-    javacall_printf("[GB300-DEBUG] javacall_file_open: path=%s, flags=%d, nativeFlags=%d, fd=%d\n", pszOsFilename, flags, nativeFlags, fd);
 
     if (fd < 0) {
         *handle = NULL;
@@ -342,16 +340,12 @@ javacall_result javacall_file_exist(const javacall_utf16 * fileName, int fileNam
         return JAVACALL_FAIL;
     }
 
-    javacall_printf("[GB300-DEBUG] javacall_file_exist checking: %s\n", szOsFilename);
-
     int fd = open(szOsFilename, O_RDONLY, 0);
     if (fd >= 0) {
         close(fd);
-        javacall_printf("[GB300-DEBUG] javacall_file_exist FOUND: %s\n", szOsFilename);
         return JAVACALL_OK;
     }
 
-    javacall_printf("[GB300-DEBUG] javacall_file_exist NOT FOUND: %s\n", szOsFilename);
     return JAVACALL_FAIL;
 }
 

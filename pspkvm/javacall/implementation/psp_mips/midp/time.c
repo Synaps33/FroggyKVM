@@ -44,10 +44,12 @@ typedef struct _timer{
     javacall_bool cyclic;
     SceUInt uSecToWait;
     javacall_callback_func cbFunc;
+    javacall_int64 target_time_ms;
 } timer;
 
 static timer timers[MAX_TIMERS];
 static int timer_slots[MAX_TIMERS] = {0};
+static int active_timers_count = 0;
 
 static javacall_int64 time_offset = 0;
 
@@ -108,20 +110,33 @@ javacall_result javacall_time_initialize_timer(
         return JAVACALL_FAIL;
     }
 
-    SceUInt uSec = (SceUInt)wakeupInMilliSecondsFromNow*1000;
-    SceUID id = sceKernelSetAlarm(uSec, alarm_handler, (void*)slot);
-    if (id < 0) {
-    	javacall_print("[Javacall Error]sceKernelSetAlarm failed!\n");
-    	timer_slots[slot] = 0;
-    	return JAVACALL_FAIL;
-    }
-    timers[slot].alarmID = id;
+    SceUInt uSec = (SceUInt)wakeupInMilliSecondsFromNow * 1000;
+    timers[slot].alarmID = 1;
     timers[slot].cyclic = cyclic;
     timers[slot].cbFunc = func;
     timers[slot].uSecToWait = uSec;
+    timers[slot].target_time_ms = javacall_time_get_milliseconds_since_1970() + (javacall_int64)wakeupInMilliSecondsFromNow;
+    active_timers_count++;
     *handle = (javacall_handle)slot;
-//    printf("javacall_time_initialize_timer:%d, %d\n", cyclic, uSec);
     return JAVACALL_OK;
+}
+
+void gb300_check_timers(void) {
+    if (active_timers_count <= 0) return;
+    javacall_int64 now = javacall_time_get_milliseconds_since_1970();
+    for (int i = 0; i < MAX_TIMERS; i++) {
+        if (timer_slots[i] && timers[i].cbFunc) {
+            if (now >= timers[i].target_time_ms) {
+                if (timers[i].cyclic) {
+                    timers[i].target_time_ms = now + (javacall_int64)(timers[i].uSecToWait / 1000);
+                } else {
+                    timer_slots[i] = 0;
+                    if (active_timers_count > 0) active_timers_count--;
+                }
+                timers[i].cbFunc((javacall_handle*)i);
+            }
+        }
+    }
 }
 
 /**
@@ -140,7 +155,10 @@ javacall_result javacall_time_finalize_timer(javacall_handle handle){
     }
 //    javacall_print("javacall_time_finalize_timer:ok\n");
     sceKernelCancelAlarm(timers[i].alarmID);
-    timer_slots[i] = 0;
+    if (timer_slots[i]) {
+        timer_slots[i] = 0;
+        if (active_timers_count > 0) active_timers_count--;
+    }
     return JAVACALL_OK;
 }
 
@@ -210,12 +228,9 @@ static void set_time_offset() {
  * @return milliseconds elapsed since midnight (00:00:00), January 1, 1970
  */
 javacall_int64 /*OPTIONAL*/ javacall_time_get_milliseconds_since_1970(void){
-    if (time_offset == 0) {
-    	 set_time_offset();
-    }
-    javacall_int64 ret = (javacall_int64)sceKernelGetSystemTimeWide() / 1000LL + time_offset;
-    //printf("javacall_time_get_milliseconds_since_1970:%d\n",ret);
-    return ret;
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (javacall_int64)tv.tv_sec * 1000LL + (javacall_int64)(tv.tv_usec / 1000);
 }
  
 /**
@@ -224,10 +239,9 @@ javacall_int64 /*OPTIONAL*/ javacall_time_get_milliseconds_since_1970(void){
  * @return seconds elapsed since midnight (00:00:00), January 1, 1970
  */
 javacall_time_seconds /*OPTIONAL*/ javacall_time_get_seconds_since_1970(void){
-    if (time_offset == 0) {
-    	 set_time_offset();
-    }
-    return (javacall_time_seconds)(((javacall_int64)sceKernelGetSystemTimeWide() / 1000000LL + time_offset / 1000LL)&0xFFFFFFFF);
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (javacall_time_seconds)tv.tv_sec;
 }
 
 /**
@@ -236,7 +250,9 @@ javacall_time_seconds /*OPTIONAL*/ javacall_time_get_seconds_since_1970(void){
  * @return elapsed time in milliseconds
  */
 javacall_time_milliseconds /*OPTIONAL*/ javacall_time_get_clock_milliseconds(void){
-    return (javacall_time_milliseconds)(sceKernelGetSystemTimeWide() / 1000LL);
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (javacall_time_milliseconds)((javacall_int64)tv.tv_sec * 1000LL + (javacall_int64)(tv.tv_usec / 1000));
 }
 
 #ifdef __cplusplus

@@ -207,9 +207,22 @@ inline bool JVM::load_main_class(JVM_SINGLE_ARG_TRAPS) {
   ObjArray::Fast arguments = get_main_args(JVM_SINGLE_ARG_CHECK_0);
 
   // Find the method to invoke
+  ObjArray::Fast m_list = klass().methods();
+  tty->print_cr("[PSPKVM] klass '%s' has %d methods:", _main_class ? _main_class : "NULL", m_list().length());
+  for (int mi = 0; mi < m_list().length(); mi++) {
+    Method::Raw m = m_list().obj_at(mi);
+    if (m.not_null()) {
+      tty->print("  [%d] ", mi);
+      Symbol::Raw m_name = m().name();
+      Symbol::Raw m_sig = m().signature();
+      m_name().print_symbol_on(tty);
+      m_sig().print_symbol_on(tty);
+      tty->print_cr(" (static=%d)", m().is_static());
+    }
+  }
+
   Method::Fast main_method =
-      klass().lookup_method(Symbols::main_name(),
-                          Symbols::string_array_void_signature());
+      klass().lookup_method(Symbols::main_name(), NULL);
   if (main_method.is_null() || !main_method().is_static()) {
     Throw::error(main_method_not_found JVM_THROW_0);
   }
@@ -414,14 +427,14 @@ int JVM::start() {
     goto done;
   }
 
-  tty->print_cr("[GB300-DEBUG] JVM::start -> calling load_main_class");
+  tty->print_cr("[PSPKVM] JVM::start -> calling load_main_class: %s", _main_class ? _main_class : "NULL");
   if (GenerateROMImage) {
     ok = start_standalone_rom_generator(JVM_SINGLE_ARG_NO_CHECK);
   } else {
     ok = load_main_class(JVM_SINGLE_ARG_NO_CHECK);
   }
 
-  tty->print_cr("[GB300-DEBUG] JVM::start -> load_main_class ok=%d", (int)ok);
+  tty->print_cr("[PSPKVM] JVM::start -> load_main_class ok=%d", (int)ok);
 
   if (!ok) {
     if (CURRENT_HAS_PENDING_EXCEPTION) {
@@ -466,7 +479,7 @@ int JVM::start() {
   } else {
     if (!Universe::is_stopping()) {
       // the debugger may have killed the VM, so check is_stopping first
-      tty->print_cr("[GB300-DEBUG] JVM::start -> calling run()");
+      tty->print_cr("[PSPKVM] JVM::start -> calling run() (executing main method)...");
       run();
     }
   }

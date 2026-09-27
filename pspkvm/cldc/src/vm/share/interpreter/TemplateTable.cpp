@@ -802,6 +802,12 @@ void TemplateTable::initialize_fast(SourceMacros* assembler) {
   def_2(Bytecodes::_fast_2_ldc_w,
         align_code_base,
         bc_fast_ldc, T_LONG, true);
+  def_2(Bytecodes::_fast_class_ldc,
+        align_code_base,
+        bc_fast_ldc, T_OBJECT, false);
+  def_2(Bytecodes::_fast_class_ldc_w,
+        align_code_base,
+        bc_fast_ldc, T_OBJECT, true);
 
   def_2(Bytecodes::_fast_1_putstatic,
         align_code_base,

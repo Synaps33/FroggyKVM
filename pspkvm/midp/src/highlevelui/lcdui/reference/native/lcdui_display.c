@@ -31,6 +31,7 @@
  */
 
 
+#include <stdio.h>
 #include <sni.h>
 #include <jvm.h>
 #include <commonKNIMacros.h>
@@ -76,6 +77,12 @@ KNIDECL(javax_microedition_lcdui_Display_refresh0) {
     }
 #endif
 
+    static int refresh_count = 0;
+    refresh_count++;
+    if (refresh_count == 1 || (refresh_count % 300) == 0) {
+        fprintf(stderr, "[GB300] refresh0: #%d id=%d rect=(%d,%d)-(%d,%d)\n", refresh_count, displayId, x1, y1, x2, y2);
+        fflush(stderr);
+    }
     if (midpHasForeground(displayId)) {
       // Paint only if this is the foreground MIDlet
       lcdlf_refresh(x1, y1, x2, y2);

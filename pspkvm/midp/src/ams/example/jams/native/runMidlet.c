@@ -339,6 +339,12 @@ runMidlet(int argc, char** commandlineArgs) {
             }
         }
 
+        {
+            extern void gb300_hacker_log(const char *tag, const char *msg, int pct);
+            gb300_hacker_log("AMS", "INITIALIZING ISOLATE", 75);
+            gb300_hacker_log("EXEC", "STARTING MIDLET THREAD", 85);
+        }
+
         do {
             status = midp_run_midlet_with_args_cp(suiteId, &classname,
                                                   &arg0, &arg1, &arg2,

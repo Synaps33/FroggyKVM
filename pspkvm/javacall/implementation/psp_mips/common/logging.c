@@ -44,9 +44,35 @@ static int log_channel_file = 0;
 */
 extern void xlog(const char *fmt, ...);
 
+static int last_was_spam = 0;
+static int is_spam_log(const char *msg) {
+    if (!msg) return 1;
+    if (strcmp(msg, "\n") == 0 || strcmp(msg, "\r\n") == 0) return last_was_spam;
+    if (strstr(msg, "find_entry:")) { last_was_spam = 1; return 1; }
+    if (strstr(msg, "do_inflate")) { last_was_spam = 1; return 1; }
+    if (strstr(msg, "read_completely")) { last_was_spam = 1; return 1; }
+    if (strstr(msg, "Inflater::")) { last_was_spam = 1; return 1; }
+    if (strstr(msg, "array_class()")) { last_was_spam = 1; return 1; }
+    if (strstr(msg, "insert:")) { last_was_spam = 1; return 1; }
+    last_was_spam = 0;
+    return 0;
+}
+
+#if defined(SF2000) || defined(GB300)
+extern int fs_sync(const char *path);
+#else
+#include <unistd.h>
+#define fs_sync(p) sync()
+#endif
+
+static void write_to_froggy_log(const char *msg) {
+    (void)msg;
+}
+
 void javacall_print(const char *s) {
-    if (s) {
-        xlog("[PSPKVM] %s", s);
+    if (s && !is_spam_log(s)) {
+        write_to_froggy_log(s);
+        fputs(s, stderr);
     }
 }
 
@@ -58,7 +84,10 @@ void javacall_printf (const char* format, ...) {
   vsnprintf(logs, sizeof(logs), format, ap);
   va_end(ap);
 
-  xlog("[PSPKVM] %s", logs);
+  if (!is_spam_log(logs)) {
+      write_to_froggy_log(logs);
+      fputs(logs, stderr);
+  }
 }
 
 void javacall_logging_channel(int channel) {

@@ -128,8 +128,10 @@ void Task::setup_mirrors(JVM_SINGLE_ARG_TRAPS) {
 }
 
 void Task::fast_bootstrap(JVM_SINGLE_ARG_TRAPS) {
+  tty->print_cr("[PSPKVM] fast_bootstrap -> setup_mirrors...");
   setup_mirrors(JVM_SINGLE_ARG_CHECK);
 
+  tty->print_cr("[PSPKVM] fast_bootstrap -> bootstrap_initialize classes...");
   Universe::object_class        ()->bootstrap_initialize(JVM_SINGLE_ARG_CHECK);
   Universe::thread_class        ()->bootstrap_initialize(JVM_SINGLE_ARG_CHECK);
   Universe::java_lang_Class_class()->bootstrap_initialize(JVM_SINGLE_ARG_CHECK);
@@ -138,12 +140,9 @@ void Task::fast_bootstrap(JVM_SINGLE_ARG_TRAPS) {
   Universe::throwable_class     ()->bootstrap_initialize(JVM_SINGLE_ARG_CHECK);
   Universe::error_class         ()->bootstrap_initialize(JVM_SINGLE_ARG_CHECK);
 
-  // The System class must be initialized here. Otherwise if we call
-  // String.getBytes(), among other things, before System is
-  // initialized, it will cause a chain reaction and cause the
-  // com.sun.cldc.i18n.Helper class to fail to initialize. See CR
-  // 6371479: "init_classes_inited_at_build may cause system to fail to start"
+  tty->print_cr("[PSPKVM] fast_bootstrap -> system_class()->initialize()...");
   Universe::system_class()->initialize(JVM_SINGLE_ARG_NO_CHECK_AT_BOTTOM);
+  tty->print_cr("[PSPKVM] fast_bootstrap -> done!");
 }
 
 bool Task::init_first_task(JVM_SINGLE_ARG_TRAPS) {
@@ -350,6 +349,8 @@ void Task::forward_stop(int ecode, int ereason JVM_TRAPS) {
 }
 
 void Task::stop(int exit_code, int exit_reason JVM_TRAPS) {
+  printf("[TASK STOP] task=%d, code=%d, reason=%d\n", task_id(), exit_code, exit_reason);
+  fflush(stdout);
   set_status(TASK_STOPPING);
   set_exit_code(exit_code);
   set_exit_reason(exit_reason);

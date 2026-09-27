@@ -46,11 +46,11 @@
 #include <exe_entry_point.h>
 #include <javacall_lifecycle.h>
 
-static javacall_result midpHandleSetVmArgs(int argc, char* argv);
+static javacall_result midpHandleSetVmArgs(int argc, char** argv);
 static javacall_result midpHandleSetHeapSize(midp_event_heap_size heap_size);
 static javacall_result midpHandleListMIDlets(void);
 static javacall_result midpHandleListStorageNames(void);
-static javacall_result midpHandleRemoveMIDlet(midp_event_remove_midletremoveMidletEvent);
+static javacall_result midpHandleRemoveMIDlet(midp_event_remove_midlet removeMidletEvent);
 
 
 
@@ -76,23 +76,39 @@ void JavaTask(void) {
     }
     
     xlog("[JavaTask] Initializing MIDP memory...\n");
-    if (midpInitializeMemory(2*1280*1024+1024*1024) != 0) {
+    if (midpInitializeMemory(4 * 1024 * 1024) != 0) {
         xlog("[JavaTask] ERROR: midpInitializeMemory failed (Not enough memory)\n");
         return;
     }
     xlog("[JavaTask] MIDP memory initialized successfully.\n");
+    {
+        extern void gb300_hacker_log(const char *tag, const char *msg, int pct);
+        gb300_hacker_log("MEM", "MIDP HEAP INITIALIZED", 55);
+    }
 
     //javacall_global_init();
     javacall_events_init();
     javacall_keymap_init();
 
     /* Set Java heap size according to system heap size */
-    heapsize = javacall_total_heap_size();
-    heapsize -= 1024*1024;
-    heapsize -= (heapsize/32);
+    extern int g_custom_heap_size;
+    if (g_custom_heap_size > 0) {
+        heapsize = g_custom_heap_size;
+    } else {
+        heapsize = javacall_total_heap_size();
+        heapsize -= 1024*1024;
+        heapsize -= (heapsize/32);
+        if (heapsize > 48 * 1024 * 1024) {
+            heapsize = 48 * 1024 * 1024;
+        }
+    }
     JVM_SetConfig(JVM_CONFIG_HEAP_CAPACITY, heapsize);
     JVM_SetConfig(JVM_CONFIG_HEAP_MINIMUM, heapsize);
-    xlog("[JavaTask] Java heap capacity set to %d bytes.\n", heapsize);
+    xlog("[JavaTask] Java heap capacity set to %d bytes (%.2f MB).\n", heapsize, (double)heapsize / (1024.0 * 1024.0));
+    {
+        extern void gb300_hacker_log(const char *tag, const char *msg, int pct);
+        gb300_hacker_log("KVM", "HEAP CAPACITY COMMITTED", 62);
+    }
 
     /* Outer Event Loop */
     while (JavaTaskIsGoOn) {
@@ -176,13 +192,14 @@ void JavaTask(void) {
 /**
  * 
  */
-static javacall_result midpHandleSetVmArgs(int argc, char* argv) {
+static javacall_result midpHandleSetVmArgs(int argc, char** argv) {
     int used;
 
     while ((used = JVM_ParseOneArg(argc, argv)) > 0) {
         argc -= used;
         argv += used;
     }
+    return JAVACALL_OK;
 }
 
 /**
@@ -191,6 +208,7 @@ static javacall_result midpHandleSetVmArgs(int argc, char* argv) {
 static javacall_result midpHandleSetHeapSize(midp_event_heap_size heap_size) {
     JVM_SetConfig(JVM_CONFIG_HEAP_CAPACITY, heap_size.heap_size);
     JVM_SetConfig(JVM_CONFIG_HEAP_MINIMUM, heap_size.heap_size);
+    return JAVACALL_OK;
 }
 
 /**

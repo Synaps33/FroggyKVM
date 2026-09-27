@@ -9,21 +9,23 @@ ifeq ($(platform), sf2000)
     CC = $(MIPS)gcc
     CXX = $(MIPS)g++
     AR = $(MIPS)ar
-    CFLAGS += -EL -march=mips32 -mtune=mips32 -msoft-float -ffast-math
-    CFLAGS += -G0 -mno-abicalls -fno-pic -ffreestanding
-    CFLAGS += -ffunction-sections -fdata-sections
-    CFLAGS += -DSF2000 -DNO_THREADS -DGB300 -DPSP_COMPAT
-    CXXFLAGS += -fno-use-cxa-atexit -fno-exceptions -fno-rtti
+    MIPS_FLAGS = -EL -march=mips32 -mtune=mips32r2 -msoft-float -ffast-math -G0 -mno-abicalls -fno-pic -ffreestanding -ffunction-sections -fdata-sections -DSF2000 -DNO_THREADS -DGB300 -DPSP_COMPAT -DPRODUCT=1
+    override CFLAGS += $(MIPS_FLAGS)
+    override CXXFLAGS += $(MIPS_FLAGS) -fno-use-cxa-atexit -fno-exceptions -fno-rtti
     STATIC_LINKING = 1
 else
     TARGET = $(NAME)_libretro.so
     CC = gcc
     CXX = g++
+    override CFLAGS += -m32 -O3 -fomit-frame-pointer -fPIC -Wno-incompatible-pointer-types -Wno-implicit-function-declaration
+    override CXXFLAGS += -m32 -O3 -fomit-frame-pointer -fPIC -fpermissive
+    LDFLAGS += -m32
+    SHARED := -shared -Wl,--no-undefined
 endif
 
 all: $(TARGET)
 
-MORE_CFLAGS = -O2 -fno-strict-aliasing -DUSE_PRECOMPILED_HEADER=1 \
+MORE_CFLAGS = -O3 -fomit-frame-pointer -finline-functions -fno-strict-aliasing -DUSE_PRECOMPILED_HEADER=1 \
 	-I. \
 	-Ipspkvm/platform_gb300 \
 	-Ilibretro/core \
@@ -67,6 +69,7 @@ MORE_CFLAGS = -O2 -fno-strict-aliasing -DUSE_PRECOMPILED_HEADER=1 \
 	-Ipspkvm/midp/src/events/eventqueue/include \
 	-Ipspkvm/midp/src/events/eventqueue_port/include \
 	-Ipspkvm/midp/src/events/eventsystem/include \
+	-Ipspkvm/midp/src/events/mastermode_port/include \
 	-Ipspkvm/midp/src/ams/ams_base/include \
 	-Ipspkvm/midp/src/ams/suitestore/common_api/include \
 	-Ipspkvm/midp/src/ams/suitestore/internal_api/include \
@@ -84,10 +87,19 @@ MORE_CFLAGS = -O2 -fno-strict-aliasing -DUSE_PRECOMPILED_HEADER=1 \
 	-Ipspkvm/midp/src/i18n/i18n_main/include \
 	-Ipspkvm/midp/src/highlevelui/javacall_application/include \
 	-Ipspkvm/midp/src/highlevelui/lcdlf/include \
+	-Ipspkvm/midp/src/highlevelui/lcdlf/lfjava/include \
+	-Ipspkvm/midp/src/highlevelui/lfjport/include \
 	-Ipspkvm/midp/src/push/push_server/include \
 	-Ipspkvm/midp/src/lowlevelui/graphics_api/include \
+	-Ipspkvm/midp/src/lowlevelui/graphics_api/gxapi_native/native \
 	-Ipspkvm/midp/src/lowlevelui/graphics/include \
+	-Ipspkvm/midp/src/lowlevelui/graphics/gx_putpixel/include \
+	-Ipspkvm/midp/src/lowlevelui/putpixel_port/include \
+	-Ipspkvm/midp/src/lowlevelui/image/include \
 	-Ipspkvm/midp/src/lowlevelui/image_api/include \
+	-Ipspkvm/midp/src/lowlevelui/image_decode/include \
+	-Ipspkvm/midp/src/lowlevelui/image/img_putpixel/native \
+	-Ipspkvm/midp/src/core/jarutil/include \
 	-Ipspkvm/pcsl/memory \
 	-Ipspkvm/pcsl/memory/memory_port \
 	-Ipspkvm/pcsl/memory/memory_port/javacall \
@@ -97,16 +109,17 @@ MORE_CFLAGS = -O2 -fno-strict-aliasing -DUSE_PRECOMPILED_HEADER=1 \
 	-Ipspkvm/pcsl/print \
 	-Ipspkvm/pcsl/string \
 	-Ipspkvm/pcsl/string/utf16 \
+	-Ipspkvm/pcsl/string/util \
 	-Ipspkvm/pcsl/types \
 	-Ipspkvm/pcsl/types/javacall_psp_gcc \
 	-Ipspkvm/pisces/src/native/midp/include \
 	-Ipspkvm/pisces/src/native/common/include \
+	-Ipspkvm/jpeg \
+	-DENABLE_JPEG=1 \
 	-fomit-frame-pointer \
 	-Wno-unused -Wno-format -Wno-sign-compare \
-	-D__LIBRETRO__ -DHAVE_LIBRETRO -DLC_CORE_STACK=LC_CORE
-
-CFLAGS  += $(MORE_CFLAGS)
-CXXFLAGS = $(CFLAGS)
+	-D__LIBRETRO__ -DHAVE_LIBRETRO -DLC_CORE_STACK=LC_CORE -DLC_HIGHUI=LC_CORE -DLC_LOWUI=LC_CORE \
+	-include pspkvm/platform_gb300/eventqueue_compat.h
 
 OBJS = \
 	pspkvm/platform_gb300/video.o \
@@ -114,17 +127,35 @@ OBJS = \
 	pspkvm/platform_gb300/input.o \
 	pspkvm/platform_gb300/filesystem.o \
 	pspkvm/platform_gb300/timer.o \
+	pspkvm/platform_gb300/puff.o \
+	pspkvm/platform_gb300/gif_decode.o \
+	pspkvm/platform_gb300/midlet_meta.o \
+	pspkvm/platform_gb300/rms_posix.o \
 	pspkvm/platform_gb300/platform.o \
 	pspkvm/platform_gb300/vm_stubs.o \
 	pspkvm/platform_gb300/vm_stubs_cpp.o \
+	pspkvm/platform_gb300/skin_bin.o \
+	pspkvm/platform_gb300/localized_strings.o \
+	pspkvm/midp/src/highlevelui/lcdlf/lfjava/native/lfj_cskin.o \
 	pspkvm/platform_gb300/Throw_override.o \
-	pspkvm/cldc/src/vm/share/runtime/ClassFileParser.o \
-	pspkvm/cldc/src/vm/share/handles/ConstantPool.o \
 	pspkvm/platform_gb300/interp_stubs.o \
+	pspkvm/platform_gb300/input_mode_kni.o \
+	pspkvm/platform_gb300/native_weak_stubs.o \
+	pspkvm/pcsl/string/util/utf.o \
+	pspkvm/cldc/src/vm/share/natives/sni.o \
 	pspkvm/javacall/implementation/psp_mips/common/events.o \
+	pspkvm/midp/src/core/kni_util/reference/native/midpUtilKni.o \
+	pspkvm/midp/src/core/kni_util/reference/native/kni_globals.o \
+	pspkvm/midp/src/core/kni_util/reference/native/midpException.o \
+	pspkvm/midp/src/core/vm_services/cldc_vm/native/midp_thread.o \
+	pspkvm/midp/src/events/eventsystem/mastermode/native/midp_master_mode_events.o \
+	pspkvm/midp/src/events/mastermode_port/javacall/native/midp_msgQueue_md.o \
+	pspkvm/midp/src/events/eventqueue/reference/native/midpEvents.o \
+	pspkvm/midp/src/events/eventqueue/reference/native/midpEventUtil.o \
 	pspkvm/javacall/implementation/psp_mips/common/memory.o \
 	pspkvm/javacall/implementation/psp_mips/common/logging.o \
 	pspkvm/javacall/implementation/psp_mips/common/file.o \
+	pspkvm/javacall/implementation/stubs/common/dir.o \
 	pspkvm/cldc/src/vm/share/handles/JavaClass.o \
 	pspkvm/cldc/src/vm/share/handles/FieldType.o \
 	pspkvm/cldc/src/vm/share/handles/Signature.o \
@@ -150,6 +181,7 @@ OBJS = \
 	pspkvm/javacall/implementation/psp_mips/midp/input.o \
 	pspkvm/javacall/implementation/psp_mips/midp/font.o \
 	pspkvm/javacall/implementation/psp_mips/midp/image.o \
+	pspkvm/javacall/implementation/psp_mips/midp/imageRom.o \
 	pspkvm/javacall/implementation/psp_mips/midp/lifecycle.o \
 	pspkvm/javacall/implementation/psp_mips/midp/keypress.o \
 	pspkvm/javacall/implementation/psp_mips/midp/keymap.o \
@@ -162,7 +194,55 @@ OBJS = \
 	pspkvm/midp/src/ams/example/jams_port/javacall/native/runMidlet_md.o \
 	pspkvm/midp/src/ams/ams_base/reference/native/midpInit.o \
 	pspkvm/midp/src/ams/ams_base_cldc/reference/native/midpCommandState.o \
+	pspkvm/midp/src/ams/ams_base_cldc/reference/native/midpMidletSuiteUtils.o \
 	pspkvm/midp/src/ams/ams_base_cldc/reference/native/midp_run.o \
+	pspkvm/midp/src/ams/ams_base/reference/native/midpInflate.o \
+	pspkvm/midp/src/highlevelui/javacall_application/reference/native/jcapp_export.o \
+	pspkvm/midp/src/highlevelui/lcdlf/lfjava/native/lfj_export.o \
+	pspkvm/midp/src/highlevelui/lfjport/javacall/native/lfjport_jc_export.o \
+	pspkvm/midp/src/highlevelui/lcdui/reference/native/lcdui_display.o \
+	pspkvm/midp/src/lowlevelui/graphics/gx_putpixel/native/gxj_graphics.o \
+	pspkvm/midp/src/lowlevelui/graphics/gx_putpixel/native/gxj_image.o \
+	pspkvm/midp/src/lowlevelui/graphics/gx_putpixel/native/gxj_putpixel.o \
+	pspkvm/midp/src/lowlevelui/graphics/gx_putpixel/native/gxj_screen_buffer.o \
+	pspkvm/midp/src/lowlevelui/graphics/gx_putpixel/native/gxj_text.o \
+	pspkvm/midp/src/lowlevelui/putpixel_port/javacall/native/gxjport_text.o \
+	pspkvm/midp/src/lowlevelui/graphics/gx_putpixel/native/gxj_font_bitmap.o \
+	pspkvm/midp/src/lowlevelui/graphics/gx_putpixel/native/gxj_graphics_asm.o \
+	pspkvm/midp/src/lowlevelui/graphics_api/gxapi_native/native/gxapi_graphics_kni.o \
+	pspkvm/midp/src/lowlevelui/graphics_api/gxapi_native/native/gxapi_font_kni.o \
+	pspkvm/midp/src/lowlevelui/graphics_api/gxapi_native/native/gxapi_anchor.o \
+	pspkvm/midp/src/lowlevelui/image/img_putpixel/native/imgj_imagedatafactory_kni.o \
+	pspkvm/midp/src/lowlevelui/image/img_putpixel/native/imgj_imagedata_kni.o \
+	pspkvm/midp/src/lowlevelui/image_decode/reference/native/imgdcd_png_decode.o \
+	pspkvm/midp/src/lowlevelui/image_decode/reference/native/imgdcd_image.o \
+	pspkvm/midp/src/lowlevelui/image_decode/reference/native/imgdcd_image_util.o \
+	pspkvm/midp/src/lowlevelui/image_decode/reference/native/imgdcd_image_decode.o \
+	pspkvm/jpeg/jcomapi.o \
+	pspkvm/jpeg/jdapimin.o \
+	pspkvm/jpeg/jdapistd.o \
+	pspkvm/jpeg/jdcoefct.o \
+	pspkvm/jpeg/jdcolor.o \
+	pspkvm/jpeg/jddctmgr.o \
+	pspkvm/jpeg/jdhuff.o \
+	pspkvm/jpeg/jdinput.o \
+	pspkvm/jpeg/jdmainct.o \
+	pspkvm/jpeg/jdmarker.o \
+	pspkvm/jpeg/jdmaster.o \
+	pspkvm/jpeg/jdmerge.o \
+	pspkvm/jpeg/jdphuff.o \
+	pspkvm/jpeg/jdpostct.o \
+	pspkvm/jpeg/jdsample.o \
+	pspkvm/jpeg/jerror.o \
+	pspkvm/jpeg/jidctfst.o \
+	pspkvm/jpeg/jidctred.o \
+	pspkvm/jpeg/jmemmgr.o \
+	pspkvm/jpeg/jmemnobs.o \
+	pspkvm/jpeg/jquant1.o \
+	pspkvm/jpeg/jquant2.o \
+	pspkvm/jpeg/jutils.o \
+	pspkvm/jpeg/jpegdecoder.o \
+	pspkvm/ext/nokia/src/native/nokia_ui_kni.o \
 	pspkvm/cldc/src/vm/share/handles/JavaNear.o \
 	pspkvm/cldc/src/vm/share/runtime/IsolateObj.o \
 	pspkvm/pisces/src/native/common/src/PiscesBlit.o \
@@ -198,7 +278,6 @@ OBJS = \
 	pspkvm/cldc/src/vm/share/runtime/OsFile.o \
 	pspkvm/cldc/src/vm/share/runtime/TaskContext.o \
 	pspkvm/cldc/src/vm/share/runtime/Throwable.o \
-	pspkvm/cldc/src/vm/share/runtime/Throw.o \
 	pspkvm/cldc/src/vm/share/runtime/Synchronizer.o \
 	pspkvm/cldc/src/vm/share/runtime/JavaVTable.o \
 	pspkvm/cldc/src/vm/share/runtime/Field.o \
@@ -256,10 +335,33 @@ OBJS = \
 	pspkvm/cldc/src/vm/share/interpreter/InterpreterRuntime.o \
 	pspkvm/cldc/src/vm/share/interpreter/TemplateTable.o \
 	pspkvm/cldc/src/vm/share/natives/kni.o \
+	pspkvm/cldc/src/vm/share/natives/KniUncommon.o \
 	pspkvm/cldc/src/vm/share/natives/Natives.o \
+	pspkvm/cldc/src/vm/share/natives/NativesTable.o \
 	pspkvm/cldc/src/vm/cpu/c/Interpreter_c.o \
 	pspkvm/cldc/src/vm/share/interpreter/Bytecodes.o \
-	pspkvm/cldc/src/vm/cpu/c/FloatSupport_c.o
+	pspkvm/cldc/src/vm/cpu/c/FloatSupport_c.o \
+	pspkvm/cldc/src/vm/cpu/c/Frame_c.o \
+	pspkvm/cldc/src/vm/share/float/FloatNatives.o \
+	pspkvm/cldc/src/vm/share/float/JFP_lib_sin.o \
+	pspkvm/cldc/src/vm/share/float/JFP_lib_cos.o \
+	pspkvm/cldc/src/vm/share/float/JFP_lib_tan.o \
+	pspkvm/cldc/src/vm/share/float/JFP_lib_asin.o \
+	pspkvm/cldc/src/vm/share/float/JFP_lib_acos.o \
+	pspkvm/cldc/src/vm/share/float/JFP_lib_atan.o \
+	pspkvm/cldc/src/vm/share/float/JFP_lib_atan2.o \
+	pspkvm/cldc/src/vm/share/float/JFP_lib_ceil.o \
+	pspkvm/cldc/src/vm/share/float/JFP_lib_floor.o \
+	pspkvm/cldc/src/vm/share/float/JFP_lib_fabs.o \
+	pspkvm/cldc/src/vm/share/float/JFP_lib_copysign.o \
+	pspkvm/cldc/src/vm/share/float/JFP_lib_scalbn.o \
+	pspkvm/cldc/src/vm/share/float/IEEE754_sqrt.o \
+	pspkvm/cldc/src/vm/share/float/IEEE754_fmod.o \
+	pspkvm/cldc/src/vm/share/float/IEEE754_rem_pio2.o \
+	pspkvm/cldc/src/vm/share/float/Remainder_pio2_kernel.o \
+	pspkvm/cldc/src/vm/share/float/Sine_kernel.o \
+	pspkvm/cldc/src/vm/share/float/Cosine_kernel.o \
+	pspkvm/cldc/src/vm/share/float/Tangent_kernel.o
 
 $(TARGET): $(OBJS)
 ifeq ($(STATIC_LINKING), 1)
@@ -271,8 +373,8 @@ endif
 clean:
 	$(RM) $(TARGET) $(OBJS)
 
-CFLAGS += $(MORE_CFLAGS)
-CXXFLAGS += $(CFLAGS) $(MORE_CFLAGS)
+override CFLAGS += $(MORE_CFLAGS)
+override CXXFLAGS += $(MORE_CFLAGS)
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@

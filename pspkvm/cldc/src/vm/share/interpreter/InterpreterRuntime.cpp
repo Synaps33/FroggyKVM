@@ -77,6 +77,14 @@ extern "C" {
 
 #endif
 
+  // CONSTANT_Class entries store a class id, while ldc must push the
+  // corresponding java.lang.Class object.
+  ReturnOop get_java_mirror_for_class_id(Thread* /*thread*/, jint class_id JVM_TRAPS) {
+    UsingFastOops fast_oops;
+    JavaClass::Fast klass = Universe::class_from_id(class_id);
+    return klass().get_or_allocate_java_mirror(JVM_SINGLE_ARG_NO_CHECK);
+  }
+
   void stack_overflow(Thread* thread, address stack_pointer) {
     Thread::stack_overflow(thread, stack_pointer);
   }
@@ -479,7 +487,7 @@ extern "C" {
 
     GUARANTEE(object.not_null() && array.not_null(), "Sanity check");
 
-    ObjArrayClass::Raw array_klass= array.blueprint();
+    ObjArrayClass::Raw array_klass = array.blueprint();
     JavaClass::Raw element_klass  = array_klass().element_class();
     JavaClass::Raw object_klass   = object.blueprint();
 
@@ -762,16 +770,22 @@ extern "C" {
         if (tag.is_unresolved_string()) {
           cp().string_at(index JVM_CHECK_(Bytecodes::_illegal));
         }
-        GUARANTEE(   cp().tag_at(index).is_string()
-                  || cp().tag_at(index).is_float()
-                  || cp().tag_at(index).is_int(), "Sanity check");
+        tag = cp().tag_at(index);
+        if (tag.is_klass()) {
+          JavaClass::Raw klass = cp().klass_at(index JVM_CHECK_(Bytecodes::_illegal));
+          klass().get_or_allocate_java_mirror(JVM_SINGLE_ARG_CHECK_(Bytecodes::_illegal));
+          quicken_bc = Bytecodes::_fast_class_ldc;
+        } else {
+          GUARANTEE(tag.is_string() || tag.is_float() || tag.is_int(),
+                    "Sanity check");
 #if ENABLE_JAVA_STACK_TAGS
-             if (tag.is_int())   quicken_bc = Bytecodes::_fast_ildc;
-        else if (tag.is_float()) quicken_bc = Bytecodes::_fast_fldc;
-        else                     quicken_bc = Bytecodes::_fast_aldc;
+               if (tag.is_int())   quicken_bc = Bytecodes::_fast_ildc;
+          else if (tag.is_float()) quicken_bc = Bytecodes::_fast_fldc;
+          else                     quicken_bc = Bytecodes::_fast_aldc;
 #else
-      quicken_bc = Bytecodes::_fast_1_ldc;
+          quicken_bc = Bytecodes::_fast_1_ldc;
 #endif
+        }
       }
       break;
     case Bytecodes::_ldc_w: {
@@ -781,17 +795,22 @@ extern "C" {
         if (cp().tag_at(index).is_unresolved_string()) {
           cp().string_at(index JVM_CHECK_(Bytecodes::_illegal));
         }
-        GUARANTEE(cp().tag_at(index).is_string()
-                  || cp().tag_at(index).is_float()
-                  || cp().tag_at(index).is_int(), "Sanity check");
-#if ENABLE_JAVA_STACK_TAGS
         ConstantTag tag = cp().tag_at(index);
-             if (tag.is_int())   quicken_bc = Bytecodes::_fast_ildc_w;
-        else if (tag.is_float()) quicken_bc = Bytecodes::_fast_fldc_w;
-        else                     quicken_bc = Bytecodes::_fast_aldc_w;
+        if (tag.is_klass()) {
+          JavaClass::Raw klass = cp().klass_at(index JVM_CHECK_(Bytecodes::_illegal));
+          klass().get_or_allocate_java_mirror(JVM_SINGLE_ARG_CHECK_(Bytecodes::_illegal));
+          quicken_bc = Bytecodes::_fast_class_ldc_w;
+        } else {
+          GUARANTEE(tag.is_string() || tag.is_float() || tag.is_int(),
+                    "Sanity check");
+#if ENABLE_JAVA_STACK_TAGS
+               if (tag.is_int())   quicken_bc = Bytecodes::_fast_ildc_w;
+          else if (tag.is_float()) quicken_bc = Bytecodes::_fast_fldc_w;
+          else                     quicken_bc = Bytecodes::_fast_aldc_w;
 #else
-        quicken_bc = Bytecodes::_fast_1_ldc_w;
+          quicken_bc = Bytecodes::_fast_1_ldc_w;
 #endif
+        }
 
       }
       break;

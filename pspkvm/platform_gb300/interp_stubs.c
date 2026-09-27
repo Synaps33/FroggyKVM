@@ -37,10 +37,10 @@ int* _rom_constant_pool_fast = 0;
  * Value: has_Interpreter(1) | has_FloatingPoint(0x40) | has_TraceBytecodes(0x4) 
  * Since we have float support (ENABLE_FLOAT=1) and no trace:
  * = 1 | 0x40 = 0x41 */
-int assembler_loop_type = 0x41;
+__attribute__((weak)) int assembler_loop_type = 0x41;
 
 /* Bytecode counter */
-int _bytecode_counter = 0;
+__attribute__((weak)) int _bytecode_counter = 0;
 
 /* Protected page - used when ENABLE_PAGE_PROTECTION=1 which we don't have
  * but the linker may still want the symbol from GPSkeleton refs */

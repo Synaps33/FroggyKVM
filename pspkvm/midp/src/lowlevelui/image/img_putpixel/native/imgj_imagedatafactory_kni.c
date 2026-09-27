@@ -25,6 +25,7 @@
  */
 
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
 
 #include <sni.h>
@@ -37,6 +38,7 @@
 #include <imgapi_image.h>
 #include <img_errorcodes.h>
 #include <imgdcd_image_util.h>
+#include "gif_decode.h"
 
 #if ENABLE_IMAGE_CACHE
 #include <imageCache.h>
@@ -211,6 +213,36 @@ MIDP_ERROR img_decode_data2cache(unsigned char* srcBuffer,
         memcpy(rawBuffer->header, imgdcd_raw_header, 4);
         rawBuffer->width  = width;        /* Use default endian */
         rawBuffer->height = height;        /* Use default endian */
+
+        *ret_dataBuffer = (unsigned char *)rawBuffer;
+        *ret_length = offsetof(imgdcd_image_buffer_raw, data)+pixelSize+alphaSize;
+
+        return MIDP_ERROR_NONE;
+
+    case IMGDCD_IMAGE_FORMAT_GIF:
+        rawBuffer = (imgdcd_image_buffer_raw *)
+          midpMalloc(offsetof(imgdcd_image_buffer_raw, data)+pixelSize+alphaSize);
+
+        if (rawBuffer == NULL) {
+            return MIDP_ERROR_OUT_MEM;
+        }
+
+        pixelData = (PIXEL *)rawBuffer->data;
+        alphaData = rawBuffer->data + pixelSize;
+
+        rawBuffer->hasAlpha = froggy_decode_gif(srcBuffer, length,
+                                                width, height,
+                                                (uint16_t *)pixelData,
+                                                (unsigned char *)alphaData,
+                                                NULL, NULL) ? KNI_TRUE : KNI_FALSE;
+        if (!rawBuffer->hasAlpha) {
+            alphaData = NULL;
+            alphaSize = 0;
+        }
+
+        memcpy(rawBuffer->header, imgdcd_raw_header, 4);
+        rawBuffer->width  = width;
+        rawBuffer->height = height;
 
         *ret_dataBuffer = (unsigned char *)rawBuffer;
         *ret_length = offsetof(imgdcd_image_buffer_raw, data)+pixelSize+alphaSize;
@@ -687,6 +719,60 @@ KNIDECL(javax_microedition_lcdui_ImageDataFactory_loadJPEG) {
 
     KNI_EndHandles();
     KNI_ReturnVoid();
+}
+
+/**
+ * Decodes the given byte array into the <tt>ImageData</tt> for GIF images.
+ * Java declaration:
+ *     loadGIF(Ljavax/microedition/lcdui/ImageData;[BII)Z
+ */
+KNIEXPORT KNI_RETURNTYPE_BOOLEAN
+KNIDECL(javax_microedition_lcdui_ImageDataFactory_loadGIF) {
+    int length = KNI_GetParameterAsInt(4);
+    int offset = KNI_GetParameterAsInt(3);
+    unsigned char* srcBuffer = NULL;
+    PIXEL *imgPixelData = NULL;
+    ALPHA *imgAlphaData = NULL;
+    java_imagedata * midpImageData = NULL;
+    jboolean has_alpha = KNI_FALSE;
+
+    KNI_StartHandles(4);
+    KNI_DeclareHandle(alphaData);
+    KNI_DeclareHandle(pixelData);
+    KNI_DeclareHandle(gifData);
+    KNI_DeclareHandle(imageData);
+
+    KNI_GetParameterAsObject(2, gifData);
+    KNI_GetParameterAsObject(1, imageData);
+
+    midpImageData = IMGAPI_GET_IMAGEDATA_PTR(imageData);
+    srcBuffer = (unsigned char *)JavaByteArray(gifData);
+
+    unhand(jbyte_array, pixelData) = midpImageData->pixelData;
+    if (!KNI_IsNullHandle(pixelData)) {
+        imgPixelData = (PIXEL *)JavaByteArray(pixelData);
+    }
+
+    unhand(jbyte_array, alphaData) = midpImageData->alphaData;
+    if (!KNI_IsNullHandle(alphaData)) {
+        imgAlphaData = (ALPHA *)JavaByteArray(alphaData);
+    }
+
+    if (srcBuffer && imgPixelData && midpImageData) {
+        bool res = froggy_decode_gif(srcBuffer + offset, length,
+                                     midpImageData->width, midpImageData->height,
+                                     (uint16_t *)imgPixelData,
+                                     (unsigned char *)imgAlphaData,
+                                     NULL, NULL);
+        if (res) {
+            has_alpha = KNI_TRUE;
+        }
+    } else {
+        KNI_ThrowNew(midpIllegalArgumentException, NULL);
+    }
+
+    KNI_EndHandles();
+    KNI_ReturnBoolean(has_alpha);
 }
 
 /**

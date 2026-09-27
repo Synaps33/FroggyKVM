@@ -410,6 +410,8 @@ bool Method::bytecode_inline_filter(bool& has_field_get,
       case Bytecodes::_fast_1_ldc:
       case Bytecodes::_fast_1_ldc_w:
       case Bytecodes::_fast_2_ldc_w:
+      case Bytecodes::_fast_class_ldc:
+      case Bytecodes::_fast_class_ldc_w:
 
       case Bytecodes::_fast_1_putstatic:
       case Bytecodes::_fast_2_putstatic:
@@ -1292,6 +1294,11 @@ void Method::iterate_push_constant_1(int i, BytecodeClosure* blk JVM_TRAPS) {
     UsingFastOops internal;
     Oop::Fast string = c().string_at(i JVM_CHECK);
     blk->push_obj(&string JVM_NO_CHECK_AT_BOTTOM);
+  } else if (ConstantTag::is_klass(tag)) {
+    JavaClass::Raw klass = c().klass_at(i JVM_CHECK);
+    JavaClassObj::Raw mirror =
+      klass().get_or_allocate_java_mirror(JVM_SINGLE_ARG_CHECK);
+    blk->push_obj(&mirror JVM_NO_CHECK_AT_BOTTOM);
   } else {
     blk->illegal_code(JVM_SINGLE_ARG_NO_CHECK_AT_BOTTOM);
   }
@@ -1817,6 +1824,7 @@ void Method::iterate_bytecode(int bci, BytecodeClosure* blk,
 #else
     case Bytecodes::_fast_1_ldc:
 #endif
+    case Bytecodes::_fast_class_ldc:
       iterate_push_constant_1(get_ubyte(bci+1), blk JVM_NO_CHECK);
       break;
 
@@ -1827,6 +1835,7 @@ void Method::iterate_bytecode(int bci, BytecodeClosure* blk,
 #else
     case Bytecodes::_fast_1_ldc_w:
 #endif
+    case Bytecodes::_fast_class_ldc_w:
       iterate_push_constant_1(get_java_ushort(bci+1), blk JVM_NO_CHECK);
       break;
 

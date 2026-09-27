@@ -35,6 +35,7 @@ extern "C" {
 #include "malloc.h"
 
 static int max_heap_size = 0;
+void javacall_printf(const char *format, ...);
 
 /** 
  * Allocates large memory heap
@@ -46,7 +47,7 @@ static int max_heap_size = 0;
  * @return	  a pointer to the newly allocated memory, or <tt>0</tt> if not available
  */
 void* javacall_memory_heap_allocate(int size, /*OUT*/ int* outSize) {
-	int sz=12*1024*1024;
+	int sz = 38 * 1024 * 1024;
 	int reserved_heap = 512*1024;
 	char* tmpp=NULL;
 	char* resv=NULL;
@@ -128,7 +129,7 @@ void  /*OPTIONAL*/ javacall_free(void* ptr) {
 
 int javacall_total_heap_size() {
     if (max_heap_size <= 0) {
-        return 4 * 1024 * 1024;
+        return 52 * 1024 * 1024;
     }
     return max_heap_size;
 }

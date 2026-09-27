@@ -25,7 +25,9 @@
  */
 
 #include "incls/_precompiled.incl"
+#if !USE_PRECOMPILED_HEADER
 #include "incls/_Frame_c.cpp.incl"
+#endif
 
 
 #if ENABLE_EMBEDDED_CALLINFO

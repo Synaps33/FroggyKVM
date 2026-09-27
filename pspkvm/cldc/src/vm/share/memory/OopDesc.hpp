@@ -49,7 +49,7 @@ inline void oop_write_barrier_for_young_obj(OopDesc** addr, OopDesc* value)
 }
 
 // Call this if addr is not guaranteed to be in the young space
-inline void oop_write_barrier(OopDesc** addr, OopDesc* value) { *addr = value; }
+void oop_write_barrier(OopDesc** addr, OopDesc* value);
 
 class OopDesc {
 public:

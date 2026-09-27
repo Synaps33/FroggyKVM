@@ -47,6 +47,7 @@ extern "C" {
   extern Bytecodes::Code getstatic(Thread* THREAD);
   extern Bytecodes::Code handle_breakpoint(Thread *thread);
   extern void handle_single_step(Thread *thread);
+  extern void gb300_check_timers(void);
 
   // external interpreter runtime routines, see InterpreterRuntime_<arch>.cpp
   // and  InterpreterRuntime.cpp
@@ -57,9 +58,11 @@ extern "C" {
   extern void            lock_stack_lock(Thread* THREAD,
                                          StackLock* stack_lock JVM_TRAPS);
   extern ReturnOop       find_exception_frame(Thread* THREAD,
-                                              OopDesc* raw_exception);
+                                               OopDesc* raw_exception);
+  extern ReturnOop       get_java_mirror_for_class_id(Thread* THREAD,
+                                                       jint class_id JVM_TRAPS);
   extern void            unlock_special_stack_lock(Thread* THREAD,
-                                                   OopDesc *lock_obj);
+                                                    OopDesc *lock_obj);
 
   // init FPU
   extern void InitFPU();
@@ -529,6 +532,17 @@ enum {
     return *(jint*)addr;
   }
 
+  static inline jint int_from_bytecode(address addr) {
+#if HARDWARE_LITTLE_ENDIAN && !ENABLE_NATIVE_ORDER_REWRITING
+    return (jint)( ((juint)((jubyte*)addr)[0] << 24) |
+                   ((juint)((jubyte*)addr)[1] << 16) |
+                   ((juint)((jubyte*)addr)[2] <<  8) |
+                   ((juint)((jubyte*)addr)[3]) );
+#else
+    return *(jint*)addr;
+#endif
+  }
+
   static inline jlong long_from_addr(address addr) {
     jlong_accessor acc;
     acc.words[0] = *(jint*)addr;
@@ -585,6 +599,10 @@ enum {
     // use g_jpc to prevent compiler from optimizing this memory access
     _protected_page[INTERPRETER_TIMER_TICK_SLOT] = (int)g_jpc;
 #else
+    static int branch_count = 0;
+    if ((++branch_count & 0x7FF) == 0) {
+      gb300_check_timers();
+    }
     if (_rt_timer_ticks > 0) {
       interpreter_call_vm_1((address)&timer_tick, T_VOID, (jint)NATIVE_ARG);
     }
@@ -1349,6 +1367,9 @@ enum {
   }
 
   static bool resume_thread() {
+    if (Thread::current() == NULL) {
+      return false;
+    }
     // restore values from current thread structure
     g_jsp = (address)GET_THREAD_INT(stack_pointer);
     g_jfp = OBJ_POP();
@@ -1360,6 +1381,8 @@ enum {
     address pentry = (address)GET_THREAD_INT(pending_entries);
     if (pentry) {
       if (GET_THREAD_INT(status) & THREAD_TERMINATING) {
+        fprintf(stderr, "[THREAD %d EXIT STATUS_TERMINATING]\n", Thread::current()->id());
+        fflush(stderr);
         SET_THREAD_INT(pending_entries, 0);
         BREAK_INTERPRETER_LOOP(JMP_THREAD_EXIT);
       } else {
@@ -1371,14 +1394,10 @@ enum {
           }
         }
         max_len = max_len * 8 + StackLock::size() + 4;
-        // stack grows to smaller addresses
-        address new_stack_ptr = (address)GET_THREAD_INT(stack_pointer) - max_len;
+        address new_stack_ptr = (address)GET_THREAD_INT(stack_pointer) + (JavaStackDirection * max_len);
         // increase stack size
-        if (new_stack_ptr < _current_stack_limit) {
-          if (interpreter_call_vm_1((address)&stack_overflow, T_VOID,
-                                    (jint)new_stack_ptr)) {
-            return true;
-          }
+        if (JavaStackDirection < 0 ? (new_stack_ptr < _current_stack_limit) : (new_stack_ptr > _current_stack_limit)) {
+          Thread::stack_overflow(Thread::current(), new_stack_ptr);
         }
         // invoke the pending activation
         shared_entry(return_point);
@@ -1461,6 +1480,9 @@ enum {
         // exception is stored in frame
         _current_pending_exception =
           (OopDesc*)GET_ENTRY_FRAME(pending_exception);
+
+        fprintf(stderr, "[THREAD %d EXIT EXCEPTION %p]\n", Thread::current()->id(), _current_pending_exception);
+        fflush(stderr);
 
         BREAK_INTERPRETER_LOOP(JMP_THREAD_EXIT);
       } else {
@@ -1769,8 +1791,13 @@ enum {
     // get the size of the locals
     jushort max_locals = get_max_locals(method);
 
-    // reserve space for locals
-    g_jsp -= (max_locals - num_params) * BytesPerStackElement;
+    // reserve space for locals and zero out uninitialized locals
+    // so GC never sees leftover pointers from previous stack frames
+    while (max_locals > num_params) {
+      g_jsp -= BytesPerStackElement;
+      *(jint*)g_jsp = 0;
+      max_locals--;
+    }
     // Reserve space on stack for frame
     g_jsp -= JavaFrame::frame_desc_size();
 
@@ -2342,6 +2369,8 @@ enum {
       SET_THREAD_INT(last_java_fp, (jint)old_jfp);
 
       if (g_jfp == NULL) {
+        fprintf(stderr, "[THREAD %d EXIT NORMAL]\n", Thread::current()->id());
+        fflush(stderr);
         BREAK_INTERPRETER_LOOP(JMP_THREAD_EXIT);
       }
 
@@ -2405,6 +2434,19 @@ enum {
       SHOULD_NOT_REACH_HERE();
     }
 
+    ADVANCE(wide ? 3 : 2);
+  }
+
+  static void fast_class_ldc(bool wide) {
+    jushort idx = wide ? GET_SHORT(0) : GET_BYTE(0);
+    address cpool = GET_FRAME(cpool);
+    jint class_id = get_from_cpool(cpool, idx);
+
+    if (interpreter_call_vm_1((address)&get_java_mirror_for_class_id,
+                              T_OBJECT, class_id)) {
+      return;
+    }
+    OBJ_PUSH((address)GET_THREAD_INT(obj_value));
     ADVANCE(wide ? 3 : 2);
   }
 
@@ -3596,11 +3638,11 @@ enum {
     // tableswitch bytecode
     address aligned_jpc = (address)((jint)(g_jpc + 1 + 3) & ~3);
     // get default target
-    jint    target = int_from_addr(aligned_jpc);
-    jint    low    = int_from_addr(aligned_jpc + 4);
-    jint    high   = int_from_addr(aligned_jpc + 8);
+    jint    target = int_from_bytecode(aligned_jpc);
+    jint    low    = int_from_bytecode(aligned_jpc + 4);
+    jint    high   = int_from_bytecode(aligned_jpc + 8);
     if (index >= low && index <= high) {
-      target = int_from_addr(aligned_jpc + 12 + (index - low) * 4);
+      target = int_from_bytecode(aligned_jpc + 12 + (index - low) * 4);
     }
     g_jpc += target;
     check_timer_tick();
@@ -3612,13 +3654,13 @@ enum {
     // lookupswitch bytecode
     address aligned_jpc = (address)((jint)(g_jpc + 1 + 3) & ~3);
     // get default target
-    jint    target = int_from_addr(aligned_jpc);
-    jint    npairs = int_from_addr(aligned_jpc + 4);
+    jint    target = int_from_bytecode(aligned_jpc);
+    jint    npairs = int_from_bytecode(aligned_jpc + 4);
 
     while (npairs-- > 0) {
       aligned_jpc += 8;
-      if (int_from_addr(aligned_jpc) == key) {
-        target = int_from_addr(aligned_jpc + 4);
+      if (int_from_bytecode(aligned_jpc) == key) {
+        target = int_from_bytecode(aligned_jpc + 4);
         break;
       }
     }
@@ -3824,6 +3866,14 @@ enum {
 
   BYTECODE_IMPL(fast_2_ldc_w)
     fast_ldc(T_LONG, true);
+  BYTECODE_IMPL_END
+
+  BYTECODE_IMPL(fast_class_ldc)
+    fast_class_ldc(false);
+  BYTECODE_IMPL_END
+
+  BYTECODE_IMPL(fast_class_ldc_w)
+    fast_class_ldc(true);
   BYTECODE_IMPL_END
 
   BYTECODE_IMPL(fast_1_putstatic)
@@ -4525,6 +4575,8 @@ static void init_dispatch_table() {
   DEF_BC(fast_1_ldc);
   DEF_BC(fast_1_ldc_w);
   DEF_BC(fast_2_ldc_w);
+  DEF_BC(fast_class_ldc);
+  DEF_BC(fast_class_ldc_w);
   DEF_BC(fast_1_putstatic);
   DEF_BC(fast_2_putstatic);
   DEF_BC(fast_a_putstatic);
@@ -4628,7 +4680,11 @@ static void Interpret() {
       interpreter_dispatch_table[*g_jpc]();
     }
   } else {
+    static unsigned int bc_counter = 0;
     for (;;) {
+      if ((++bc_counter & 0x1FFF) == 0) {
+        gb300_check_timers();
+      }
 #ifdef BYTECODE_COUNT
       interpreter_count_table[*g_jpc]++;
       if (_output_interpreter_count) {
@@ -6639,11 +6695,11 @@ BYTECODE_IMPL_ASM(lshl)
     // tableswitch bytecode
     address aligned_jpc = (address)((jint)(g_jpc + 1 + 3) & ~3);
     // get default target
-    jint    target = int_from_addr(aligned_jpc);
-    jint    low    = int_from_addr(aligned_jpc + 4);
-    jint    high   = int_from_addr(aligned_jpc + 8);
+    jint    target = int_from_bytecode(aligned_jpc);
+    jint    low    = int_from_bytecode(aligned_jpc + 4);
+    jint    high   = int_from_bytecode(aligned_jpc + 8);
     if (index >= low && index <= high) {
-      target = int_from_addr(aligned_jpc + 12 + (index - low) * 4);
+      target = int_from_bytecode(aligned_jpc + 12 + (index - low) * 4);
     }
     g_jpc += target;
     check_timer_tick();
@@ -6655,13 +6711,13 @@ BYTECODE_IMPL_ASM(lshl)
     // lookupswitch bytecode
     address aligned_jpc = (address)((jint)(g_jpc + 1 + 3) & ~3);
     // get default target
-    jint    target = int_from_addr(aligned_jpc);
-    jint    npairs = int_from_addr(aligned_jpc + 4);
+    jint    target = int_from_bytecode(aligned_jpc);
+    jint    npairs = int_from_bytecode(aligned_jpc + 4);
 
     while (npairs-- > 0) {
       aligned_jpc += 8;
-      if (int_from_addr(aligned_jpc) == key) {
-        target = int_from_addr(aligned_jpc + 4);
+      if (int_from_bytecode(aligned_jpc) == key) {
+        target = int_from_bytecode(aligned_jpc + 4);
         break;
       }
     }
@@ -6897,7 +6953,15 @@ BYTECODE_IMPL_ASM(lshl)
     "lw $v1, 4($t0)\n"
     PUSH_LONG_ASM(v0, v1)
   BYTECODE_IMPL_END_AND_ADVANCE_ASM(3)
-  
+
+  BYTECODE_IMPL(fast_class_ldc)
+    fast_class_ldc(false);
+  BYTECODE_IMPL_END
+
+  BYTECODE_IMPL(fast_class_ldc_w)
+    fast_class_ldc(true);
+  BYTECODE_IMPL_END
+
   BYTECODE_IMPL(fast_1_putstatic)
     address addr = get_static_field_offset();
     if (addr != NULL) {
@@ -7612,6 +7676,8 @@ static void init_dispatch_table() {
   DEF_BC(fast_1_ldc);
   DEF_BC(fast_1_ldc_w);
   DEF_BC(fast_2_ldc_w);
+  DEF_BC(fast_class_ldc);
+  DEF_BC(fast_class_ldc_w);
   DEF_BC(fast_1_putstatic);
   DEF_BC(fast_2_putstatic);
   DEF_BC(fast_a_putstatic);

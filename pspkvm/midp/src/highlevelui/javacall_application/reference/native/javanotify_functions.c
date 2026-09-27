@@ -504,8 +504,8 @@ extern void xlog(const char *fmt, ...);
 void javanotify_start_java_with_arbitrary_args(int argc, char* argv[]) {
     midp_jc_event_union e;
     
-    xlog("[javanotify] start_java_with_arbitrary_args(argc=%d, argv[0]='%s', argv[1]='%s', argv[2]='%s')\n",
-         argc, (argc > 0 && argv[0]) ? argv[0] : "", (argc > 1 && argv[1]) ? argv[1] : "", (argc > 2 && argv[2]) ? argv[2] : "");
+    xlog("[javanotify] start_java_with_arbitrary_args(argc=%d, argv[0]='%s', argv[1]='%s', argv[2]='%s', argv[3]='%s')\n",
+         argc, (argc > 0 && argv[0]) ? argv[0] : "", (argc > 1 && argv[1]) ? argv[1] : "", (argc > 2 && argv[2]) ? argv[2] : "", (argc > 3 && argv[3]) ? argv[3] : "");
 
     if (argc > MIDP_RUNMIDLET_MAXIMUM_ARGS)
         argc = MIDP_RUNMIDLET_MAXIMUM_ARGS;

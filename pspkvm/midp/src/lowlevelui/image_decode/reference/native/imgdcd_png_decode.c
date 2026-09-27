@@ -31,6 +31,7 @@
 #include <midp_logging.h>
 
 #include "imgdcd_intern_image_decode.h"
+#include <stdio.h>
 
 #define IHDR_CHUNK 0x49484452
 #define PLTE_CHUNK 0x504C5445

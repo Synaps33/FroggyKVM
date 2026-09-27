@@ -128,8 +128,9 @@ extern "C" {
   const unsigned int     _rom_compiled_methods_count = 0;
 #endif // ENABLE_APPENDED_CALLINFO
 
-#if !defined(PRODUCT) || ENABLE_JVMPI_PROFILE || ENABLE_TTY_TRACE
   const int              _rom_system_symbols_src[]        = {0};
+
+#if !defined(PRODUCT) || ENABLE_JVMPI_PROFILE || ENABLE_TTY_TRACE
   const int               _rom_original_class_info_count  = 0;
   const OriginalClassInfo _rom_original_class_info[] = {
     {(const char*)0x0,

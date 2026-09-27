@@ -122,15 +122,12 @@ ReturnOop Inflater::read_completely(JVM_SINGLE_ARG_TRAPS) {
   JarFileParser::Fast jfp = get_jar_parser_if_needed(JVM_SINGLE_ARG_CHECK_0);
   (void)jfp;
 
-  tty->print_cr("[GB300-DEBUG] Inflater::read_completely called");
   int status;
   do {
     status = do_inflate(JVM_SINGLE_ARG_CHECK_0);
-    tty->print_cr("[GB300-DEBUG] do_inflate returned status=%d, out_offset=%d", status, out_offset());
   } while (status == INFLATE_MORE);
 
   const int size = file_size();
-  tty->print_cr("[GB300-DEBUG] read_completely: status=%d, out_offset=%d, file_size=%d", status, out_offset(), size);
 
   if (status == INFLATE_ERROR || (int) out_offset() != size) {
     tty->print_cr("[GB300-DEBUG] read_completely: FAILED due to status error or size mismatch");
@@ -139,14 +136,12 @@ ReturnOop Inflater::read_completely(JVM_SINGLE_ARG_TRAPS) {
 
   if (file_handle() != NULL) {
     juint actual_crc = crc32(ARRAY_BASE(out_buffer()), size);
-    tty->print_cr("[GB300-DEBUG] read_completely: actual_crc=0x%08x, expected_crc=0x%08x", actual_crc, expected_crc());
     if (actual_crc != expected_crc()) {
       tty->print_cr("[GB300-DEBUG] read_completely: CRC MISMATCH!");
       return NULL;
     }
   }
 
-  tty->print_cr("[GB300-DEBUG] read_completely: SUCCESS");
   return out_buffer();
 }
 

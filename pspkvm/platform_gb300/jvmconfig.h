@@ -18,7 +18,7 @@
 #define ENABLE_EXCESSIVE_GC 0
 #define USE_EVENT_LOGGER 0
 #define ENABLE_JVMPI 0
-#define ENABLE_JAR_ENTRY_CACHE 0
+#define ENABLE_JAR_ENTRY_CACHE 1
 #define USE_OPT_FORWARD_BRANCH 0
 #define ENABLE_BRUTE_FORCE_ICACHE_FLUSH 0
 #define ENABLE_FLOAT 1
@@ -49,26 +49,6 @@
 
 typedef uint16_t JvmPathChar;
 
-typedef struct { int length; int elements[1]; } jint_array;
-typedef struct { int length; short elements[1]; } jshort_array;
-typedef struct { int length; signed char elements[1]; } jbyte_array;
-typedef struct { int length; unsigned short elements[1]; } jchar_array;
-
-struct Java_javax_microedition_lcdui_Image {
-    short *imageData;
-    int width;
-    int height;
-};
-
-struct Java_javax_microedition_lcdui_Graphics {
-    int transX;
-    int transY;
-    int clipX1;
-    int clipY1;
-    int clipX2;
-    int clipY2;
-    int pixel;
-    struct Java_javax_microedition_lcdui_Image *img;
-};
+#include "ROMStructs.h"
 
 #endif /* _JVM_CONFIG_H_ */

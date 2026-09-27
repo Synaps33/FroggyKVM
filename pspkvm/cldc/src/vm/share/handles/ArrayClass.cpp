@@ -40,7 +40,7 @@ ReturnOop ArrayClass::compute_higher_dimension(JVM_SINGLE_ARG_TRAPS) {
   ArrayClass::Fast self = this;
   ObjArrayClass::Fast result = self().array_class();
   if (result.is_null()) {
-    result = Universe::new_obj_array_class((JavaClass*)self.obj() JVM_CHECK_0);
+    result = Universe::new_obj_array_class(&self JVM_CHECK_0);
     self().set_array_class(&result JVM_CHECK_0);
     // With fixes to ClassBySig in VMImpl.cpp we don't need to do this
     //    VMEvent::class_prepare_event(&result);

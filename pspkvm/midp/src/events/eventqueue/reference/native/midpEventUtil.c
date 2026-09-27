@@ -61,6 +61,9 @@ void midpStoreEventAndSignalAms(MidpEvent evt) {
  * @param evt The event to store
  */
 void midpStoreEventAndSignalForeground(MidpEvent evt) {
+    extern void xlog(const char *fmt, ...);
     evt.DISPLAY = gForegroundDisplayId;
+    xlog("[EVENT-SIGNAL] midpStoreEventAndSignalForeground: type=%d display=%d isolate=%d\n",
+         evt.type, evt.DISPLAY, gForegroundIsolateId);
     StoreMIDPEventInVmThread(evt, gForegroundIsolateId);
 }

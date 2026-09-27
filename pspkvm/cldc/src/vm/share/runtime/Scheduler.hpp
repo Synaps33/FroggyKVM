@@ -233,6 +233,9 @@ private:
   static void set_timer_tick() {
     _timer_has_ticked = true;
   }
+  static bool timer_has_ticked() {
+    return _timer_has_ticked;
+  }
   static bool has_waiters(Oop* obj);
   static void allocate_blocked_threads_buffer(int target_size JVM_TRAPS);
   static void allocate_blocked_threads_buffer(JVM_SINGLE_ARG_TRAPS) {

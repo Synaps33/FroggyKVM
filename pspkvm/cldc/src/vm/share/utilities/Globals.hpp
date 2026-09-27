@@ -272,7 +272,7 @@ private:
           "Thumb2 EE only: generate code using handlers")                   \
                                                                             \
       /* Threading flags */                                                 \
-  product(int, StackSize, 4 * 1024,                                         \
+  product(int, StackSize, 256 * 1024,                                       \
           "Minimum stack size in bytes")                                    \
                                                                             \
   product(int, StackPadding, 1 * 1024 + 256,                                \
@@ -292,7 +292,7 @@ private:
   product(bool, SlaveMode, false,                                           \
           "Run the VM in slave mode")                                       \
                                                                             \
-  product(bool, UseVerifier, true,                                          \
+  product(bool, UseVerifier, false,                                         \
           "Should class file verification be performed?")                   \
                                                                             \
   product(bool, VerifyOnly, false,                                          \

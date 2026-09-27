@@ -233,10 +233,7 @@ ReturnOop JarFileParser::get(const JvmPathChar* jar_file_name1,
   OsFile_Handle fh = NULL;
   for (int pass=0; pass<2; pass++) {
     if (jar_file_name1) {
-      tty->print_cr("[GB300-DEBUG] JarFileParser::get calling OsFile_open");
       fh = OsFile_open(jar_file_name1, "rb");
-      if (fh) tty->print_cr("[GB300-DEBUG] JarFileParser::get OsFile_open success");
-      else tty->print_cr("[GB300-DEBUG] JarFileParser::get OsFile_open failed");
     } else {
       fh = OsFile_open((JvmPathChar *)jar_file_name2->byte_base_address(),
                        "rb");
@@ -252,7 +249,6 @@ ReturnOop JarFileParser::get(const JvmPathChar* jar_file_name1,
     }
   }
   if (fh == NULL) {
-    tty->print_cr("[GB300-DEBUG] JarFileParser::get returning NULL because fh == NULL");
     return NULL;
   }
 
@@ -266,11 +262,9 @@ ReturnOop JarFileParser::get(const JvmPathChar* jar_file_name1,
   parser().set_timestamp(++_timestamp);
 
   if (!parser().find_end_of_central_header()) {
-    tty->print_cr("[GB300-DEBUG] JarFileParser::get find_end_of_central_header failed");
     // The jar file is corrupted. Stop parsing it.
     return NULL;
   }
-  tty->print_cr("[GB300-DEBUG] JarFileParser::get find_end_of_central_header success");
 
   parser().save_parser_in_cache(JVM_SINGLE_ARG_MUST_SUCCEED);
   return parser;
@@ -1152,8 +1146,6 @@ bool JarFileParser::add_current_entry_to_cache0(char * name, int name_len
 #endif // ENABLE_JAR_ENTRY_CACHE
 
 ReturnOop JarFileParser::load_entry(JVM_SINGLE_ARG_TRAPS) {
-  fprintf(stderr, "[GB300-DEBUG] JarFileParser::load_entry called\n");
-  fflush(stderr);
   UsingFastOops fast_oops;
   FileDecoder::Fast fd = open_entry(0 JVM_CHECK_0);
   if (fd.not_null()) {
@@ -1170,13 +1162,6 @@ ReturnOop JarFileParser::load_entry(JVM_SINGLE_ARG_TRAPS) {
  */
 bool JarFileParser::find_entry(const char *match_name JVM_TRAPS)
 {
-  if (match_name != NULL) {
-    fprintf(stderr, "[GB300-DEBUG] JarFileParser::find_entry looking for '%s'\n", match_name);
-    fflush(stderr);
-  } else {
-    fprintf(stderr, "[GB300-DEBUG] JarFileParser::find_entry looking for next entry\n");
-    fflush(stderr);
-  }
   UsingFastOops fast_oops;
   BufferedFile::Fast jar_buffer = buffered_file();
   const bool use_entry_cache = CacheJarEntries && enable_entry_cache();
@@ -1197,9 +1182,6 @@ bool JarFileParser::find_entry(const char *match_name JVM_TRAPS)
   } else {
     match_name_len = jvm_strlen(match_name);
   }
-
-  tty->print_cr("[GB300-DEBUG] find_entry: looking for '%s' (len=%d), starting at offset=%d",
-      match_name ? match_name : "(null)", (int)match_name_len, offset);
 
   while (true) {
     // raw_current_entry() may be moved by add_current_entry_to_cache(),
@@ -1314,27 +1296,21 @@ ReturnOop JarFileParser::open_entry(int flags JVM_TRAPS) {
   juint locOffset = raw_current_entry()->locOffset;
   DECLARE_STATIC_BUFFER(unsigned char, locp, TMPBUFFERSIZE);
 
-  tty->print_cr("[GB300-DEBUG] open_entry: starting locOffset=%d, method=%d, compLen=%d, decompLen=%d", locOffset, method, compLen, decompLen);
-
   /* Make sure file is not encrypted */
   if ((CENFLG(cenp) & 1) == 1) {
-    tty->print_cr("[GB300-DEBUG] open_entry: encrypted file (flag & 1 == 1) -> return NULL");
     return NULL;
   }
 
   /* Go to the beginning of the LOC header */
   if (jar_buffer().seek(locOffset + CENOFF(cenp), SEEK_SET) < 0) {
-    tty->print_cr("[GB300-DEBUG] open_entry: seek to %d failed -> return NULL", locOffset + CENOFF(cenp));
     return NULL;
   }
   /* Read it */
   if (jar_buffer().get_bytes(locp, LOCHDRSIZ) != LOCHDRSIZ) {
-    tty->print_cr("[GB300-DEBUG] open_entry: get_bytes LOC failed -> return NULL");
     return NULL;
   }
   /* Skip over name and extension, if any */
   if (jar_buffer().seek(LOCNAM(locp) + LOCEXT(locp), SEEK_CUR) < 0) {
-    tty->print_cr("[GB300-DEBUG] open_entry: seek over name/ext failed -> return NULL");
     return NULL;
   }
 
@@ -1344,7 +1320,6 @@ ReturnOop JarFileParser::open_entry(int flags JVM_TRAPS) {
   switch (method) {
   case STORED:
     if (compLen != decompLen) {
-      tty->print_cr("[GB300-DEBUG] open_entry: STORED compLen != decompLen -> return NULL");
       return NULL;
     }
     result = FileDecoder::allocate(handle, pos, decompLen, flags JVM_CHECK_0);
@@ -1355,16 +1330,12 @@ ReturnOop JarFileParser::open_entry(int flags JVM_TRAPS) {
                                 flags JVM_CHECK_0);
     break;
   default:
-    tty->print_cr("[GB300-DEBUG] open_entry: unknown method %d -> return NULL", method);
     return NULL;
   }
 
   if (result.not_null()) {
     TypeArray::Raw jar_name = pathname();
     result().set_jar_file_name(&jar_name);
-    tty->print_cr("[GB300-DEBUG] open_entry: SUCCESS!");
-  } else {
-    tty->print_cr("[GB300-DEBUG] open_entry: allocate returned NULL!");
   }
 
   return result.obj();

@@ -650,15 +650,14 @@ public class Image {
      * @return a <code>Graphics</code> object with this image as its destination
      * @throws IllegalStateException if the image is immutable
      */
+    private boolean isMutableOverride = false;
+
+    public void setMutable(boolean mutable) {
+        this.isMutableOverride = mutable;
+    }
+
     public Graphics getGraphics() {
-        if (isMutable()) {
-            // SYNC NOTE: no locking necessary as getGraphics() only allocates
-            // a new object
-            return Graphics.getImageGraphics(this);
-        } else {
-            // SYNC NOTE: Not accessing any shared data, no locking necessary
-            throw new IllegalStateException();
-        }
+        return Graphics.getImageGraphics(this);
     }
 
     /**
@@ -688,7 +687,7 @@ public class Image {
      * <code>false</code> otherwise
      */
     public boolean isMutable() {
-        return imageData.isMutable();
+        return isMutableOverride || (imageData != null && imageData.isMutable());
     }
 
 

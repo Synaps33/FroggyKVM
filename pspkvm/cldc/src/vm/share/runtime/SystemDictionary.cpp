@@ -32,6 +32,8 @@
 char SystemDictionary::_last_class_loaded[LAST_CLASS_LOADED_BUF_SIZE];
 #endif
 
+extern "C" void gb300_hacker_log_class(const char *name);
+
 ReturnOop SystemDictionary::bucket_for(ObjArray *sd, juint hash_value) {
   juint len = (juint)sd->length();
   juint index;
@@ -131,7 +133,6 @@ ReturnOop SystemDictionary::find_class_or_null(Symbol *class_name) {
 
 ReturnOop SystemDictionary::fetch_buffer(LoaderContext *loader_ctx JVM_TRAPS) {
   UsingFastOops fast_oops;
-  tty->print_cr("[GB300-DEBUG] SystemDictionary::fetch_buffer calling ClassPathAccess::open_entry");
   FileDecoder::Fast fd = 
     ClassPathAccess::open_entry(loader_ctx->class_name(), true JVM_NO_CHECK_AT_BOTTOM); // Avoid returning immediately on exception to log it
 
@@ -139,8 +140,6 @@ ReturnOop SystemDictionary::fetch_buffer(LoaderContext *loader_ctx JVM_TRAPS) {
     tty->print_cr("[GB300-DEBUG] SystemDictionary::fetch_buffer open_entry resulted in exception!");
     return NULL;
   }
-
-  tty->print_cr("[GB300-DEBUG] SystemDictionary::fetch_buffer open_entry returned fd.not_null=%d", fd.not_null());
 
   if (fd.not_null()) {
     if (UseROM && 
@@ -150,9 +149,7 @@ ReturnOop SystemDictionary::fetch_buffer(LoaderContext *loader_ctx JVM_TRAPS) {
       Throw::class_not_found(loader_ctx->class_name(), ErrorOnFailure 
                              JVM_THROW_0);
     }
-    tty->print_cr("[GB300-DEBUG] SystemDictionary::fetch_buffer calling fd.read_completely");
     Buffer::Raw result = fd().read_completely(JVM_SINGLE_ARG_NO_CHECK_AT_BOTTOM);
-    tty->print_cr("[GB300-DEBUG] SystemDictionary::fetch_buffer fd.read_completely returned!");
     if (CURRENT_HAS_PENDING_EXCEPTION) {
       tty->print_cr("[GB300-DEBUG] SystemDictionary::fetch_buffer fd.read_completely resulted in exception!");
       return NULL;
@@ -203,6 +200,11 @@ ReturnOop SystemDictionary::load_system_class(LoaderContext *loader_ctx JVM_TRAP
     Symbol::Fast class_name = cur_class().class_name();
 
     NOT_PRODUCT(class_name().string_copy(_last_class_loaded, LAST_CLASS_LOADED_BUF_SIZE);)
+    {
+      char _cls_buf[96];
+      class_name().string_copy(_cls_buf, sizeof(_cls_buf));
+      gb300_hacker_log_class(_cls_buf);
+    }
     
     FailureMode fail_mode;
     if (stack().next() == NULL) {
@@ -244,9 +246,7 @@ ReturnOop SystemDictionary::load_system_class(LoaderContext *loader_ctx JVM_TRAP
       // Load the buffer (from class file or from JAR), if necessary
       Buffer::Fast buffer = cur_class().buffer();      
       if (buffer.is_null()) {
-          tty->print_cr("[GB300-DEBUG] resolve_inner: calling fetch_buffer");
           buffer = fetch_buffer(&top_ctx JVM_CHECK_0);
-          tty->print_cr("[GB300-DEBUG] resolve_inner: fetch_buffer returned");
           cur_class().set_buffer(&buffer);
           if (top_ctx.is_system_class()) {
             cur_class().set_access_flags(cur_class().access_flags() | JVM_ACC_PRELOADED);            
@@ -256,10 +256,8 @@ ReturnOop SystemDictionary::load_system_class(LoaderContext *loader_ctx JVM_TRAP
       // Parse the class at the top of the stack. If it refers to some
       // class(es) that are not yet loader, they will be added to the
       // top of the stack.
-      tty->print_cr("[GB300-DEBUG] resolve_inner: calling parse_class");
       ClassFileParser parser(&buffer, &top_ctx);
       ic = parser.parse_class(&stack JVM_CHECK_0);
-      tty->print_cr("[GB300-DEBUG] resolve_inner: parse_class returned!");
     }
 
     GUARANTEE(cur_class.obj() != stack.obj(),
@@ -267,82 +265,61 @@ ReturnOop SystemDictionary::load_system_class(LoaderContext *loader_ctx JVM_TRAP
 
     if (!ic.is_null()) {
       // completed the loading of one class
-      tty->print_cr("[GB300-DEBUG] resolve_inner: calling insert");
       insert(&top_ctx, &ic JVM_CHECK_0);
-      tty->print_cr("[GB300-DEBUG] resolve_inner: insert returned");
 #if !ENABLE_ISOLATES
       if (!UseROM ||
           (ic.obj_field(InstanceClass::java_mirror_offset()) == NULL)) {
-        tty->print_cr("[GB300-DEBUG] resolve_inner: calling setup_java_mirror");
         ic().setup_java_mirror(JVM_SINGLE_ARG_CHECK_0);
-        tty->print_cr("[GB300-DEBUG] resolve_inner: setup_java_mirror returned");
       }
 #endif
-      tty->print_cr("[GB300-DEBUG] resolve_inner: calling class_prepare_event");
       VMEvent::class_prepare_event(&ic);
-      tty->print_cr("[GB300-DEBUG] resolve_inner: class_prepare_event returned");
     }
   }
 
-  tty->print_cr("[GB300-DEBUG] resolve_inner: returning state().result()");
   return state().result();
 }
 
 void SystemDictionary::insert(LoaderContext *loader_ctx, 
                               InstanceClass* instance_class JVM_TRAPS) {
-  tty->print_cr("[GB300-DEBUG] insert: entered");
   GUARANTEE(!instance_class->is_null(), "sanity check");
   UsingFastOops fastoops;
 
   ObjArray::Fast dictionary;
   dictionary = Universe::current_dictionary();
-  tty->print_cr("[GB300-DEBUG] insert: dictionary retrieved");
 #if ENABLE_ISOLATES
   GUARANTEE(dictionary.not_null(),"dictionary is null");
 #endif
  
   Symbol::Raw name = instance_class->name();
-  tty->print_cr("[GB300-DEBUG] insert: calculating hash");
   juint hash_value = name().hash();
-  tty->print_cr("[GB300-DEBUG] insert: hash_value = %d", hash_value);
 
   if (loader_ctx->resolve_mode() != SemiResolve) {
-    tty->print_cr("[GB300-DEBUG] insert: SemiResolve loop start");
     // A fake class may have been installed. Must replace it.
     InstanceClass::Raw ic = bucket_for(&dictionary, hash_value);
     InstanceClass::Raw last = ic;
 
     while (ic.not_null()) {
-      tty->print_cr("[GB300-DEBUG] insert: checking fake class");
       InstanceClass::Raw next = ic().next();
       Symbol::Raw name2 = ic().name();
 
       if (name2.equals(&name)) {
-        tty->print_cr("[GB300-DEBUG] insert: found matching fake class");
         GUARANTEE(ic().is_fake_class(), "duplicate must be fake");
         if (ic.equals(&last)) {
           set_bucket_for(&dictionary, hash_value, &next);
         } else {
           last().set_next(&next);
         }
-        tty->print_cr("[GB300-DEBUG] insert: calling update_fake_class");
         update_fake_class(instance_class, &ic JVM_CHECK);
-        tty->print_cr("[GB300-DEBUG] insert: update_fake_class returned");
         break;
       } else {
         last = ic;
         ic = ic().next();
       }
     }
-    tty->print_cr("[GB300-DEBUG] insert: SemiResolve loop end");
   }
-  tty->print_cr("[GB300-DEBUG] insert: before bucket_for");
   InstanceClass::Raw next = bucket_for(&dictionary, hash_value);
-  tty->print_cr("[GB300-DEBUG] insert: before set_next");
   instance_class->set_next(&next);
-  tty->print_cr("[GB300-DEBUG] insert: before set_bucket_for");
   set_bucket_for(&dictionary, hash_value, instance_class);
-  tty->print_cr("[GB300-DEBUG] insert: done basic insert");
 
 #ifdef AZZERT
   if (loader_ctx != NULL) {
@@ -355,29 +332,18 @@ void SystemDictionary::insert(LoaderContext *loader_ctx,
 void SystemDictionary::update_fake_class(InstanceClass *real_cls, 
                                          InstanceClass *fake_cls JVM_TRAPS)
 {
-  tty->print_cr("[GB300-DEBUG] update_fake_class: entered");
   UsingFastOops fastoops;
-  tty->print_cr("[GB300-DEBUG] update_fake_class: calling pop_class_id");
   Universe::pop_class_id(real_cls, fake_cls);
-  tty->print_cr("[GB300-DEBUG] update_fake_class: pop_class_id done, class_id=%d", real_cls->class_id());
 
   ObjArrayClass::Fast ac = fake_cls->array_class();
-  tty->print_cr("[GB300-DEBUG] update_fake_class: array_class not_null=%d", ac.not_null());
   if (ac.not_null()) {
 #if ENABLE_ISOLATES
-    tty->print_cr("[GB300-DEBUG] update_fake_class: ISOLATES path, getting element_class");
     InstanceClass::Raw element_class = ac().element_class();
-    tty->print_cr("[GB300-DEBUG] update_fake_class: element_class not_null=%d", !element_class.is_null());
     GUARANTEE(!element_class.is_null(), "Null element class");
     // ac.class_id() MUST be >= ROM::number_of_system_classes. Can't have
     // fake classes in ROM ???
-    int ac_class_id = ac().class_id();
-    int rom_num = ROM::number_of_system_classes();
-    tty->print_cr("[GB300-DEBUG] update_fake_class: ac.class_id=%d, ROM::num_sys_classes=%d", ac_class_id, rom_num);
     GUARANTEE(ac().class_id() >= ROM::number_of_system_classes(),
               "fake class in ROM");
-    int elem_class_id = element_class().class_id();
-    tty->print_cr("[GB300-DEBUG] update_fake_class: elem_class_id=%d, rom_num=%d, cond=%d", elem_class_id, rom_num, (elem_class_id < rom_num));
     // GB300-FIX: When there is no ROM (number_of_system_classes()==0),
     // the original condition (elem_class_id < 0) is always false, which
     // skips setup_task_mirror. This causes set_array_class to crash on
@@ -385,73 +351,51 @@ void SystemDictionary::update_fake_class(InstanceClass *real_cls,
     if (!(GenerateROMImage && !ENABLE_MONET) &&
         (ROM::number_of_system_classes() == 0 ||
          element_class().class_id() < ROM::number_of_system_classes())) {
-      tty->print_cr("[GB300-DEBUG] update_fake_class: inside ROM element class block");
       // This is an arrayclass whose element class is in ROM, need a TaskMirror
       TaskMirror::Raw tm = ac().task_mirror_no_check();
-      tty->print_cr("[GB300-DEBUG] update_fake_class: tm got, checking is_being_initialized");
       if (tm().is_being_initialized_mirror()) {
-        tty->print_cr("[GB300-DEBUG] update_fake_class: tm is_being_initialized, calling clinit_list_lookup");
         tm = TaskMirror::clinit_list_lookup(&ac);
         if (tm.is_null()) {
-          tty->print_cr("[GB300-DEBUG] update_fake_class: clinit_list_lookup null, calling ac.setup_task_mirror");
           ac().setup_task_mirror(0, 0, false JVM_CHECK);
-          tty->print_cr("[GB300-DEBUG] update_fake_class: ac.setup_task_mirror returned");
         }
       }
       // Need to dance around this problem: when we created the fake class
       // we put it into the task_array_class_list with the fake class being 
       // the containing class in the TaskMirror.  So we need to remove
       // the Task Mirror from the list and create a new one
-      tty->print_cr("[GB300-DEBUG] update_fake_class: getting fake_cls task_mirror");
       tm = fake_cls->task_mirror_no_check();
       //      GUARANTEE(!tm.is_null(), "Task mirror is null");
-      tty->print_cr("[GB300-DEBUG] update_fake_class: checking fake_cls tm.is_being_initialized");
       if (tm().is_being_initialized_mirror()) {
         // GB300-FIX: When bootstrapping without ROM, fake classes are never
         // actually added to the clinit list (their mirror_list entry is just
         // the init marker). clinit_list_remove would crash trying to find
         // a non-existent entry. Check with clinit_list_lookup first.
-        tty->print_cr("[GB300-DEBUG] update_fake_class: checking if fake_cls is in clinit list");
         TaskMirror::Raw found_tm = TaskMirror::clinit_list_lookup(fake_cls);
         if (found_tm.not_null()) {
-          tty->print_cr("[GB300-DEBUG] update_fake_class: fake_cls found in clinit list, removing");
           TaskMirror::clinit_list_remove(fake_cls);
-          tty->print_cr("[GB300-DEBUG] update_fake_class: clinit_list_remove done");
-        } else {
-          tty->print_cr("[GB300-DEBUG] update_fake_class: fake_cls NOT in clinit list, skipping remove");
         }
-        tty->print_cr("[GB300-DEBUG] update_fake_class: updating mirror_list");
         Universe::mirror_list()->obj_at_put(real_cls->class_id(),
                                            Universe::task_class_init_marker());
-        tty->print_cr("[GB300-DEBUG] update_fake_class: mirror_list updated");
       }
-      tty->print_cr("[GB300-DEBUG] update_fake_class: calling real_cls->setup_task_mirror sfsize=%d vtlen=%d", real_cls->static_field_size(), real_cls->vtable_length());
       real_cls->setup_task_mirror(real_cls->static_field_size(),
                                   real_cls->vtable_length(),
                                   Universe::before_main() ? false : true
                                   JVM_CHECK);
-      tty->print_cr("[GB300-DEBUG] update_fake_class: real_cls->setup_task_mirror returned");
     }
 #else 
   JVM_IGNORE_TRAPS;
 #endif
-    tty->print_cr("[GB300-DEBUG] update_fake_class: set_element_class");
     ac().set_element_class(real_cls);
-    tty->print_cr("[GB300-DEBUG] update_fake_class: set_array_class");
     real_cls->set_array_class(&ac JVM_CHECK);
-    tty->print_cr("[GB300-DEBUG] update_fake_class: set_array_class done");
   }
 
-  tty->print_cr("[GB300-DEBUG] update_fake_class: updating method holders");
   ObjArray::Raw methods = real_cls->methods();
   int len = methods().length();
   int class_id = real_cls->class_id();
-  tty->print_cr("[GB300-DEBUG] update_fake_class: methods len=%d class_id=%d", len, class_id);
   for (int i=0; i<len; i++) {
     Method::Raw m = methods().obj_at(i);
     m().set_holder_id((jushort) class_id);
   }
-  tty->print_cr("[GB300-DEBUG] update_fake_class: done");
 }
 
 ReturnOop 

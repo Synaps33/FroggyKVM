@@ -186,6 +186,9 @@ static inline uint32_t sceRtcGetTickResolution(void) { return 1000000; }
 
 void xlog(const char *fmt, ...);
 
+/* Hacker Loader screen & logging hooks */
+#include "hacker_loader.h"
+
 #ifdef __cplusplus
 }
 #endif

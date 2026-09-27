@@ -29,6 +29,8 @@
 
 Thread *global_null_thread = NULL;
 
+extern "C" void gb300_jvm_yield(void);
+
 int        Scheduler::_active_count;
 int        Scheduler::_async_count;
 long       Scheduler::_exit_async_pending;
@@ -418,7 +420,10 @@ void Scheduler::sleep_forever() {
     SHOULD_NOT_REACH_HERE();
   } else {
     while (*get_next_runnable_thread() == NULL) {
-      Os::sleep(0x7fffffff);
+      SETUP_ERROR_CHECKER_ARG;
+      wake_up_timed_out_sleepers(JVM_SINGLE_ARG_CHECK);
+      check_blocked_threads(20);
+      gb300_jvm_yield();
     }
   }
 }

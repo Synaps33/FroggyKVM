@@ -775,7 +775,7 @@ inline intptr_t align_size_down(intptr_t size, intptr_t alignment) {
 // Miscellaneous
 
 #define JAVA_MIN_SUPPORTED_VERSION           45
-#define JAVA_MAX_SUPPORTED_VERSION           51
+#define JAVA_MAX_SUPPORTED_VERSION           52
 
 #ifdef ARM
 #define RESCHEDULE_COUNT 0x8000

@@ -68,7 +68,7 @@ void midpStoreEventAndSignalForeground(MidpEvent evt);
  * @return true if Display object with <code>displayId</code> has 
  *         foreground, false - otherwise.
  */
-#define midpHasForeground(displayId) (displayId == gForegroundDisplayId)
+#define midpHasForeground(displayId) (1)
 
 #ifdef __cplusplus
 }

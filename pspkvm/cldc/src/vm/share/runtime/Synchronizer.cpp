@@ -253,8 +253,8 @@ void StackLock::oops_do(void do_oop(OopDesc**)) {
     // Can the following be done more cleanly?
     OopDesc** embedded_near = (OopDesc**)(this + 1);
     do_oop(embedded_near);
-    do_oop((OopDesc**)(((address)embedded_near) 
-                            + JavaNear::class_info_offset()));
+    OopDesc** ci = (OopDesc**)(((address)embedded_near) + JavaNear::class_info_offset());
+    do_oop(ci);
   }
 }
 

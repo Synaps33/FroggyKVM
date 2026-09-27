@@ -8,6 +8,42 @@ ReturnOop
 Throw::new_exception(Symbol* class_name, String* message JVM_TRAPS) {
   UsingFastOops fast_oops;
 
+  char cname[128] = {0};
+  if (class_name) {
+    class_name->string_copy(cname, sizeof(cname));
+  }
+  printf("[THROW new_exception] class_name=%s\n", cname);
+  fflush(stdout);
+
+  Thread* cur_th = Thread::current();
+  if (cur_th && cur_th->last_java_frame_exists()) {
+    Frame fr(cur_th);
+    while (true) {
+      if (fr.is_entry_frame()) {
+        if (fr.as_EntryFrame().is_first_frame()) break;
+        fr.as_EntryFrame().caller_is(fr);
+      } else {
+        JavaFrame jf = fr.as_JavaFrame();
+        Method::Raw m = jf.method();
+        if (!m.is_null()) {
+          InstanceClass::Raw ic = m().holder();
+          Symbol::Raw cls_name = ic().name();
+          Symbol::Raw mname = m().name();
+          Symbol::Raw msig = m().signature();
+          char c_holder[128] = {0};
+          char c_mname[128] = {0};
+          char c_msig[128] = {0};
+          if (!cls_name.is_null()) cls_name().string_copy(c_holder, sizeof(c_holder));
+          if (!mname.is_null()) mname().string_copy(c_mname, sizeof(c_mname));
+          if (!msig.is_null()) msig().string_copy(c_msig, sizeof(c_msig));
+          printf("[THROW STACK]   at %s.%s%s (bci=%d)\n", c_holder, c_mname, c_msig, jf.bci());
+        }
+        fr.as_JavaFrame().caller_is(fr);
+      }
+    }
+    fflush(stdout);
+  }
+
   GUARANTEE(!CURRENT_HAS_PENDING_EXCEPTION, "No pending exceptions");
   Thread::clear_current_pending_exception();
 
@@ -180,7 +216,24 @@ void Throw::class_not_found(Symbol* class_name, FailureMode fail_mode
 }
 
 void Throw::class_not_found(LoaderContext *loader_ctx JVM_TRAPS) {
+  if (loader_ctx && loader_ctx->class_name()) {
+      char cls[256] = {0};
+      loader_ctx->class_name()->string_copy(cls, sizeof(cls));
+      printf("[CLASS_NOT_FOUND] missing class: %s (fail_mode=%d)\n", cls, loader_ctx->fail_mode());
+      fflush(stdout);
+  }
   if (Universe::before_main()) {
+     FILE *fp = fopen("/mnt/sda1/froggy.log", "a");
+     if (fp) {
+         fprintf(fp, "[FATAL] class not found before main!\n");
+         if (loader_ctx && loader_ctx->class_name()) {
+             char cls[256];
+             loader_ctx->class_name()->string_copy(cls, sizeof(cls));
+             fprintf(fp, "[FATAL] missing class: %s\n", cls);
+         }
+         fflush(fp);
+         fclose(fp);
+     }
      TTY_TRACE(("class not found: "));
      loader_ctx->class_name()->print_symbol_on(tty);
      tty->cr();
@@ -203,6 +256,9 @@ void Throw::class_not_found(LoaderContext *loader_ctx JVM_TRAPS) {
 }
 
 void Throw::array_store_exception(ErrorMsgTag err JVM_TRAPS) {
+  void* ra = __builtin_return_address(0);
+  printf("[GB300-DEBUG] Throw::array_store_exception called! caller=%p, err=%d\n", ra, err);
+  fflush(stdout);
   allocate_and_throw(Symbols::java_lang_ArrayStoreException(), err
                      JVM_NO_CHECK_AT_BOTTOM);
 }
@@ -285,6 +341,17 @@ void Throw::arithmetic_exception(ErrorMsgTag err JVM_TRAPS) {
 
 void Throw::unsatisfied_link_error(Method* method JVM_TRAPS) {
   UsingFastOops fast_oops;
+  char cbuf[128] = {0}, mbuf[128] = {0};
+  if (method->holder_id() != 0xFFFF) {
+    InstanceClass::Raw h = method->holder();
+    Symbol::Raw cn = h().name();
+    cn().string_copy(cbuf, sizeof(cbuf));
+  }
+  Symbol::Raw mn = method->name();
+  mn().string_copy(mbuf, sizeof(mbuf));
+  printf("[UNSATISFIED_LINK] Missing native method: %s.%s\n", cbuf, mbuf);
+  fflush(stdout);
+
   Symbol::Fast method_name_symbol = method->name();
   String::Fast method_name_string =
       Universe::new_string(&method_name_symbol JVM_CHECK);

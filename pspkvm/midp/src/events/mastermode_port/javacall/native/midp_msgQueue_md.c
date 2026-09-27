@@ -70,7 +70,10 @@ void checkForSystemSignal(MidpReentryData* pNewSignal,
     event = (midp_jc_event_union *) binaryBuffer;
 
     switch (event->eventType) {
-    case MIDP_JC_EVENT_KEY:
+    case MIDP_JC_EVENT_KEY: {
+        extern void xlog(const char *fmt, ...);
+        xlog("[EVENT-SIGNAL] checkForSystemSignal: KEY event key=%d type=%d\n",
+             event->data.keyEvent.key, event->data.keyEvent.keyEventType);
         pNewSignal->waitingFor = UI_SIGNAL;
         pNewMidpEvent->type    = MIDP_KEY_EVENT;
         pNewMidpEvent->CHR     = event->data.keyEvent.key;
@@ -79,6 +82,7 @@ void checkForSystemSignal(MidpReentryData* pNewSignal,
         	pss();
         }
         break;
+    }
     case MIDP_JC_EVENT_PEN:
         pNewSignal->waitingFor = UI_SIGNAL;
         pNewMidpEvent->type    = MIDP_PEN_EVENT;

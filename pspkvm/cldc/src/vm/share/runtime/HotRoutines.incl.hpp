@@ -422,8 +422,15 @@ void ObjectHeap::continue_marking(void) {
 #if USE_HOT_ROUTINES
 void ObjectHeap::mark_root_and_stack(OopDesc** p) {
   OopDesc** const obj = (OopDesc**) *p;
+  if (p == (OopDesc**)Universe::global_threadlist()) {
+    fprintf(stderr, "[MARK-ROOT] global_threadlist p=%p *p=%p coll_start=%p mark_end=%p\n",
+            p, obj, _collection_area_start, mark_area_end());
+  }
   if( _collection_area_start <= obj && obj < mark_area_end()
       && !test_and_set_bit_for(obj) ) {
+    if (p == (OopDesc**)Universe::global_threadlist()) {
+      fprintf(stderr, "[MARK-ROOT] global_threadlist successfully marked!\n");
+    }
 #if ENABLE_REMOTE_TRACER
     if (RemoteTracePort > 0) {
       RemoteTracer::update_stats((OopDesc*)obj);

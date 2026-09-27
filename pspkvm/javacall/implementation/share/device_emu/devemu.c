@@ -8,11 +8,11 @@
 
 static DEVICE_INFO _devices[] = { 
 	{"J2ME Standard(480*272)",
-	480, 272, -1, -2, -3, -4, -5, 21, 22, STD_KEY_CLEAR, 0, 0, "j2me-generic"},
+	480, 272, -1, -2, -3, -4, -5, -6, -7, STD_KEY_CLEAR, 0, 0, "j2me-generic"},
 	{"J2ME Standard(320*240)",
-	320, 240, -1, -2, -3, -4, -5, 21, 22, STD_KEY_CLEAR, 0, 1, "j2me-generic"},
+	320, 240, -1, -2, -3, -4, -5, -6, -7, STD_KEY_CLEAR, 0, 1, "j2me-generic"},
 	{"J2ME Standard(240*320)",
-	240, 320, -1, -2, -3, -4, -5, 21, 22, STD_KEY_CLEAR, 0, 2, "j2me-generic"},
+	240, 320, -1, -2, -3, -4, -5, -6, -7, STD_KEY_CLEAR, 0, 2, "j2me-generic"},
 	{"Nokia(240*320)",
 	240, 320, -1, -2, -3, -4, -5, -6, -7, -8, 0, 3, "nokia-generic"},
 	{"Nokia(320*240)",
@@ -28,7 +28,7 @@ static DEVICE_INFO _devices[] = {
 	//{"SPRINT",
 	//204, 272, -1, -2, -3, -4, -5, -8, -7, UNKNOW_KEY_VALUE},
 	{"XBOX Demo",
-	320, 240, -1, -2, -3, -4, -5, 21, 22, STD_KEY_CLEAR, 0, 12, "XBOXDEMO"},
+	320, 240, -1, -2, -3, -4, -5, -6, -7, STD_KEY_CLEAR, 0, 12, "XBOXDEMO"},
 
 	//nokia
 	{"Nokia S30(96*65)",
@@ -170,9 +170,9 @@ static DEVICE_INFO _devices[] = {
 
 	// CW90
 	{"J2ME Standard(320*240, CW90)",
-	240, 320, -1, -2, -3, -4, -5, 21, 22, STD_KEY_CLEAR, 90, 57, "j2me-generic"},
+	240, 320, -1, -2, -3, -4, -5, -6, -7, STD_KEY_CLEAR, 90, 57, "j2me-generic"},
 	{"J2ME Standard(480*272, CW90)",
-	272, 480, -1, -2, -3, -4, -5, 21, 22, STD_KEY_CLEAR, 90, 58, "j2me-generic"},
+	272, 480, -1, -2, -3, -4, -5, -6, -7, STD_KEY_CLEAR, 90, 58, "j2me-generic"},
 	{"Nokia(320*240, CW90)",
 	240, 320, -1, -2, -3, -4, -5, -6, -7, -8, 90, 59, "nokia-generic"},
 	{"Nokia(480*272, CW90)",
@@ -192,9 +192,9 @@ static DEVICE_INFO _devices[] = {
 	{"SonyEricsson (480*272, CW90)",
 	272, 480, -1, -2, -3, -4, -5, -6, -7, -8, 90, 64, "se-generic"},
 	{"J2ME Standard(352*416)",
-	352, 416, -1, -2, -3, -4, -5, 21, 22, STD_KEY_CLEAR, 0, 65, "j2me-generic"},
+	352, 416, -1, -2, -3, -4, -5, -6, -7, STD_KEY_CLEAR, 0, 65, "j2me-generic"},
 	{"J2ME Standard(352*416, CW90)",
-	352, 416, -1, -2, -3, -4, -5, 21, 22, STD_KEY_CLEAR, 90, 66, "j2me-generic"},
+	352, 416, -1, -2, -3, -4, -5, -6, -7, STD_KEY_CLEAR, 90, 66, "j2me-generic"},
 	{"Nokia(352*416)",
 	352, 416, -1, -2, -3, -4, -5, -6, -7, -8, 0, 67, "nokia-generic"},
 	{"Nokia(352*416, CW90)",

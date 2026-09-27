@@ -1,9 +1,15 @@
+#include <stdio.h>
 #include <kni.h>
 #include <sni.h>
 #include <commonKNIMacros.h>
 #include <midpError.h>
 #include <gxapi_graphics.h>
 #include <imgapi_image.h>
+#include <gxj_putpixel.h>
+
+#ifndef getScreenBuffer
+#define getScreenBuffer(sbuf) ((sbuf != NULL) ? (sbuf) : &gxj_system_screen_buffer)
+#endif
 
 /////////////////////////////////////////////////////////////////////////////
 // below lines are copied from gxj_graphics.c
@@ -601,6 +607,8 @@ KNIDECL(com_nokia_mid_ui_DirectGraphicsImpl_drawPolygon) {
 //void fillPolygon(int xPoints[], int xOffset, int yPoints[], int yOffset, int nPoints, int argbColor);
 KNIEXPORT KNI_RETURNTYPE_VOID
 KNIDECL(com_nokia_mid_ui_DirectGraphicsImpl_fillPolygon) {
+	printf("[NOKIA-UI] fillPolygon called!\n");
+	fflush(stdout);
 	KNI_ReturnVoid();
 }
 
@@ -608,6 +616,69 @@ KNIDECL(com_nokia_mid_ui_DirectGraphicsImpl_fillPolygon) {
 //            int x, int y, int width, int height, int format);
 KNIEXPORT KNI_RETURNTYPE_VOID
 KNIDECL(com_nokia_mid_ui_DirectGraphicsImpl_getPixels___3IIIIIIII) {
+	jint format = KNI_GetParameterAsInt(8);
+	jint height = KNI_GetParameterAsInt(7);
+	jint width = KNI_GetParameterAsInt(6);
+	jint y = KNI_GetParameterAsInt(5);
+	jint x = KNI_GetParameterAsInt(4);
+	jint scanlength = KNI_GetParameterAsInt(3);
+	jint offset = KNI_GetParameterAsInt(2);
+	int *dstBuffer = NULL;
+
+	KNI_StartHandles(4);
+	KNI_DeclareHandle(pixels);
+	KNI_DeclareHandle(thisObject);
+	KNI_DeclareHandle(gHandle);
+	KNI_DeclareHandle(graphics);
+
+	KNI_GetParameterAsObject(1, pixels);
+	KNI_GetParameterAsObject(0, thisObject);
+
+	if (!KNI_IsNullHandle(thisObject) && !KNI_IsNullHandle(pixels)) {
+		KNI_GetObjectClass(thisObject, gHandle);
+		KNI_GetObjectField(thisObject, KNI_GetFieldID(gHandle, "graphics", "Ljavax/microedition/lcdui/Graphics;"), graphics);
+
+		if (!KNI_IsNullHandle(graphics)) {
+			java_imagedata *imgData = GET_IMAGEDATA_PTR_FROM_GRAPHICS(graphics);
+			gxj_screen_buffer screen_buffer;
+			gxj_screen_buffer *sbuf = (gxj_screen_buffer *)getScreenBuffer(
+				gxj_get_image_screen_buffer_impl(imgData, &screen_buffer, NULL));
+
+			if (sbuf != NULL && sbuf->pixelData != NULL) {
+				int srcWidth = sbuf->width;
+				int srcHeight = sbuf->height;
+				gxj_pixel_type *srcPixels = sbuf->pixelData;
+				gxj_alpha_type *srcAlpha = sbuf->alphaData;
+				int a, b;
+
+				SNI_BEGIN_RAW_POINTERS;
+				dstBuffer = (int *)JavaIntArray(pixels);
+
+				for (b = 0; b < height; b++) {
+					int sy = y + b;
+					for (a = 0; a < width; a++) {
+						int sx = x + a;
+						int dstIdx = offset + a + b * scanlength;
+						if (sx >= 0 && sx < srcWidth && sy >= 0 && sy < srcHeight) {
+							int srcIdx = sy * srcWidth + sx;
+							unsigned short p = srcPixels[srcIdx];
+							unsigned char al = (srcAlpha != NULL) ? srcAlpha[srcIdx] : 0xFF;
+							unsigned char r = (unsigned char)(((p >> 11) & 0x1F) << 3);
+							unsigned char g = (unsigned char)(((p >> 5) & 0x3F) << 2);
+							unsigned char bl = (unsigned char)((p & 0x1F) << 3);
+
+							dstBuffer[dstIdx] = (al << 24) | (r << 16) | (g << 8) | bl;
+						} else {
+							dstBuffer[dstIdx] = 0;
+						}
+					}
+				}
+				SNI_END_RAW_POINTERS;
+			}
+		}
+	}
+
+	KNI_EndHandles();
 	KNI_ReturnVoid();
 }
 
@@ -615,6 +686,80 @@ KNIDECL(com_nokia_mid_ui_DirectGraphicsImpl_getPixels___3IIIIIIII) {
 //            int x, int y, int width, int height, int format);
 KNIEXPORT KNI_RETURNTYPE_VOID
 KNIDECL(com_nokia_mid_ui_DirectGraphicsImpl_getPixels___3SIIIIIII) {
+	jint format = KNI_GetParameterAsInt(8);
+	jint height = KNI_GetParameterAsInt(7);
+	jint width = KNI_GetParameterAsInt(6);
+	jint y = KNI_GetParameterAsInt(5);
+	jint x = KNI_GetParameterAsInt(4);
+	jint scanlength = KNI_GetParameterAsInt(3);
+	jint offset = KNI_GetParameterAsInt(2);
+	unsigned short *dstBuffer = NULL;
+
+	KNI_StartHandles(4);
+	KNI_DeclareHandle(pixels);
+	KNI_DeclareHandle(thisObject);
+	KNI_DeclareHandle(gHandle);
+	KNI_DeclareHandle(graphics);
+
+	KNI_GetParameterAsObject(1, pixels);
+	KNI_GetParameterAsObject(0, thisObject);
+
+	if (!KNI_IsNullHandle(thisObject) && !KNI_IsNullHandle(pixels)) {
+		KNI_GetObjectClass(thisObject, gHandle);
+		KNI_GetObjectField(thisObject, KNI_GetFieldID(gHandle, "graphics", "Ljavax/microedition/lcdui/Graphics;"), graphics);
+
+		if (!KNI_IsNullHandle(graphics)) {
+			java_imagedata *imgData = GET_IMAGEDATA_PTR_FROM_GRAPHICS(graphics);
+			gxj_screen_buffer screen_buffer;
+			gxj_screen_buffer *sbuf = (gxj_screen_buffer *)getScreenBuffer(
+				gxj_get_image_screen_buffer_impl(imgData, &screen_buffer, NULL));
+
+			if (sbuf != NULL && sbuf->pixelData != NULL) {
+				int srcWidth = sbuf->width;
+				int srcHeight = sbuf->height;
+				gxj_pixel_type *srcPixels = sbuf->pixelData;
+				gxj_alpha_type *srcAlpha = sbuf->alphaData;
+				int a, b;
+
+				SNI_BEGIN_RAW_POINTERS;
+				dstBuffer = (unsigned short *)JavaShortArray(pixels);
+
+				for (b = 0; b < height; b++) {
+					int sy = y + b;
+					for (a = 0; a < width; a++) {
+						int sx = x + a;
+						int dstIdx = offset + a + b * scanlength;
+						if (sx >= 0 && sx < srcWidth && sy >= 0 && sy < srcHeight) {
+							int srcIdx = sy * srcWidth + sx;
+							unsigned short p = srcPixels[srcIdx];
+							unsigned char al = (srcAlpha != NULL) ? srcAlpha[srcIdx] : 0xFF;
+
+							if (format == 4444) { /* TYPE_USHORT_4444_ARGB */
+								unsigned short a4 = (al >> 4) & 0x0F;
+								unsigned short r4 = (p >> 12) & 0x0F;
+								unsigned short g4 = (p >> 7) & 0x0F;
+								unsigned short b4 = (p >> 1) & 0x0F;
+								dstBuffer[dstIdx] = (unsigned short)((a4 << 12) | (r4 << 8) | (g4 << 4) | b4);
+							} else if (format == 565) { /* TYPE_USHORT_565_RGB */
+								dstBuffer[dstIdx] = p;
+							} else {
+								unsigned short a4 = (al >> 4) & 0x0F;
+								unsigned short r4 = (p >> 12) & 0x0F;
+								unsigned short g4 = (p >> 7) & 0x0F;
+								unsigned short b4 = (p >> 1) & 0x0F;
+								dstBuffer[dstIdx] = (unsigned short)((a4 << 12) | (r4 << 8) | (g4 << 4) | b4);
+							}
+						} else {
+							dstBuffer[dstIdx] = 0;
+						}
+					}
+				}
+				SNI_END_RAW_POINTERS;
+			}
+		}
+	}
+
+	KNI_EndHandles();
 	KNI_ReturnVoid();
 }
 

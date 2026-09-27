@@ -460,6 +460,8 @@ void SourceAssembler::start() {
   MIPS_TEMP_STUB("bc_impl_fast_init_2_getstatic");
   MIPS_TEMP_STUB("bc_impl_fast_init_invokestatic");
   MIPS_TEMP_STUB("bc_impl_fast_init_new");
+  MIPS_TEMP_STUB("bc_impl_fast_class_ldc");
+  MIPS_TEMP_STUB("bc_impl_fast_class_ldc_w");
 }
 
 void SourceAssembler::stop() {

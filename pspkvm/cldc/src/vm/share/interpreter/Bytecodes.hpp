@@ -351,6 +351,9 @@ class Bytecodes: public AllStatic {
    _fast_init_invokestatic,
    _fast_init_new,
 
+   _fast_class_ldc,
+   _fast_class_ldc_w,
+
     number_of_java_codes
   };
 

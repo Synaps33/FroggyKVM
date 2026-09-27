@@ -145,6 +145,8 @@ extern "C" {
 #if !defined(ARM) || CROSS_GENERATOR
 void Thread::start_lightweight_thread() {
   Thread* thread = Thread::current();
+  fprintf(stderr, "[THREAD RUN ENTRY] thread id=%d\n", thread->id());
+  fflush(stderr);
   // idea here is that some threads can't be terminated
   // by throwing an uncatchable exceptions if they're in 'just started'
   // state (i.e. never executed), as this exception will be silently ignored
@@ -178,6 +180,8 @@ void Thread::start_lightweight_thread() {
   }
   // The following returns to another Java thread, unless this is
   // the only remaining Java thread.
+  fprintf(stderr, "[THREAD RUN EXIT] thread id=%d, has_exc=%d\n", thread->id(), CURRENT_HAS_PENDING_EXCEPTION);
+  fflush(stderr);
   call_on_primordial_stack(lightweight_thread_exit);
 
   // We can only return here if we are the last thread.
@@ -194,6 +198,12 @@ void Thread::start_lightweight_thread() {
 
 void Thread::lightweight_thread_uncaught_exception() {
   Oop::Raw exception = Thread::current_pending_exception();
+  fprintf(stderr, "[UNCAUGHT EXCEPTION] thread=%p, exc=%p\n", Thread::current(), exception.obj());
+  if (exception.not_null()) {
+    InstanceClass::Raw klass = exception().blueprint();
+    Symbol::Raw sname = klass().name();
+    fprintf(stderr, "[UNCAUGHT EXCEPTION CLASS] %.*s\n", (int)sname().length(), sname().base_address());
+  }
   if (exception.equals(Universe::string_class())) {
     // This was thrown using Throw::uncatchable() or with
     // Task::get_termination_object()
@@ -208,6 +218,8 @@ void Thread::lightweight_thread_uncaught_exception() {
 void Thread::lightweight_thread_exit() {
   SETUP_ERROR_CHECKER_ARG;
   Thread *thread = Thread::current();
+  fprintf(stderr, "[THREAD EXIT] id=%d\n", thread ? thread->id() : -1);
+  fflush(stderr);
   if (TraceThreadsExcessive) {
     TTY_TRACE_CR(("thread exit 0x%x", thread->obj()));
   }
@@ -371,6 +383,19 @@ void Thread::start(JVM_SINGLE_ARG_TRAPS) {
   EntryActivation::Fast run_entry =
       Universe::new_entry_activation(&run_method, 1 JVM_CHECK);
   run_entry().obj_at_put(0, &receiver);
+  InstanceClass::Raw klass = receiver.blueprint();
+  Symbol::Raw sname = klass().name();
+  char c_name[128] = {0};
+  if (!sname.is_null()) sname().string_copy(c_name, sizeof(c_name));
+  char c_tname[128] = {0};
+#if ENABLE_CLDC_11
+  Oop::Raw name_oop = receiver.get_name();
+  if (!name_oop.is_null()) {
+    String::Raw s = (String::Raw)name_oop;
+    s().string_copy(c_tname, sizeof(c_tname));
+  }
+#endif
+  printf("[THREAD START] thread id=%d class=%s name=%s\n", id(), c_name, c_tname);
   append_pending_entry(&run_entry);
 
   Scheduler::start(this JVM_NO_CHECK_AT_BOTTOM);
@@ -381,6 +406,32 @@ void Thread::finish() {
   Thread *thread = Thread::current();
   ThreadObj receiver = thread->thread_obj();
   GUARANTEE(receiver.is_alive(), "Sanity check");
+
+  if (thread && thread->last_java_frame_exists()) {
+    Frame fr(thread);
+    printf("[THREAD FINISH] thread id=%d\n", thread->id());
+    while (true) {
+      if (fr.is_entry_frame()) {
+        if (fr.as_EntryFrame().is_first_frame()) break;
+        fr.as_EntryFrame().caller_is(fr);
+      } else {
+        JavaFrame jf = fr.as_JavaFrame();
+        Method::Raw m = jf.method();
+        if (!m.is_null()) {
+          InstanceClass::Raw ic = m().holder();
+          Symbol::Raw cls_name = ic().name();
+          Symbol::Raw mname = m().name();
+          char c_holder[128] = {0};
+          char c_mname[128] = {0};
+          if (!cls_name.is_null()) cls_name().string_copy(c_holder, sizeof(c_holder));
+          if (!mname.is_null()) mname().string_copy(c_mname, sizeof(c_mname));
+          printf("    at %s.%s (bci=%d)\n", c_holder, c_mname, jf.bci());
+        }
+        fr.as_JavaFrame().caller_is(fr);
+      }
+    }
+    fflush(stdout);
+  }
 
   if (TraceThreadsExcessive) {
     TTY_TRACE_CR(("thread dying 0x%x", thread->obj()));

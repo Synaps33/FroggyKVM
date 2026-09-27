@@ -157,7 +157,7 @@ asm volatile(
 #define ASM_LOOPOPTIMIZE 1 /* collapse multiple scanlines to 1 */
 #endif 
 
-#ifdef PSP
+#if defined(PSP) || defined(PSP_COMPAT) || defined(SF2000) || defined(__mips__) || defined(GB300)
 #define MIPS_BLIT 1
 #endif
 

@@ -66,7 +66,7 @@ public:
   HANDLE_DEFINITION(BufferedFile, MixedOop);
 
   enum {
-    BUFFERSIZE = 256
+    BUFFERSIZE = 4096
   };
 
   jint get_byte();

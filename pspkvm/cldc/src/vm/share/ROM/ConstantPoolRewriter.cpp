@@ -1541,6 +1541,7 @@ bool ConstantPoolRewriter::shall_create_new_method(Method *method, int* p_new_si
     case Bytecodes::_fast_aldc:
 #else
     case Bytecodes::_fast_1_ldc:
+    case Bytecodes::_fast_class_ldc:
 #endif
       old_cp_index = method->get_ubyte(old_bci + 1);
       new_cp_index = get_merged_pool_entry(&cp, old_cp_index JVM_CHECK_0);
@@ -1653,6 +1654,7 @@ void ConstantPoolRewriter::correct_cp_indices(Method *method JVM_TRAPS) {
 #else
     case Bytecodes::_fast_1_ldc_w:
     case Bytecodes::_fast_2_ldc_w:
+    case Bytecodes::_fast_class_ldc_w:
     case Bytecodes::_fast_1_putstatic:
     case Bytecodes::_fast_2_putstatic:
     case Bytecodes::_fast_a_putstatic:
@@ -1686,6 +1688,7 @@ void ConstantPoolRewriter::correct_cp_indices(Method *method JVM_TRAPS) {
     case Bytecodes::_fast_aldc:
 #else
     case Bytecodes::_fast_1_ldc:
+    case Bytecodes::_fast_class_ldc:
 #endif
       {
         GUARANTEE(len == 2, "sanity");        
@@ -1768,6 +1771,7 @@ void ConstantPoolRewriter::stream_bytecodes(Method *old_method,
 #else
     case Bytecodes::_fast_1_ldc_w:
     case Bytecodes::_fast_2_ldc_w:
+    case Bytecodes::_fast_class_ldc_w:
     case Bytecodes::_fast_1_putstatic:
     case Bytecodes::_fast_2_putstatic:
     case Bytecodes::_fast_a_putstatic:
@@ -1799,6 +1803,7 @@ void ConstantPoolRewriter::stream_bytecodes(Method *old_method,
     case Bytecodes::_fast_aldc:
 #else
     case Bytecodes::_fast_1_ldc:
+    case Bytecodes::_fast_class_ldc:
 #endif
       {
         GUARANTEE(old_len == 2, "sanity");
@@ -1929,6 +1934,7 @@ int ConstantPoolRewriter::stream_ldc(Method *old_method, Method *new_method,
     case Bytecodes::_fast_aldc: code =  Bytecodes::_fast_aldc_w; break;
 #else
     case Bytecodes::_fast_1_ldc:code =  Bytecodes::_fast_1_ldc_w; break;
+    case Bytecodes::_fast_class_ldc: code = Bytecodes::_fast_class_ldc_w; break;
 #endif
     default                   : SHOULD_NOT_REACH_HERE();
     }

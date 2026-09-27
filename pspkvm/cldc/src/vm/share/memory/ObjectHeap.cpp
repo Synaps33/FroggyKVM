@@ -2040,7 +2040,8 @@ inline void ObjectHeap::compute_new_object_locations() {
     if (test_bit_for(p, bitvector_base)) {
       // Current object is live
       OopDesc* obj = (OopDesc*) p;
-      size_t size = obj->object_size_for(decode_far_class_with_real_near(obj));
+      FarClassDesc* fcd = decode_far_class_with_real_near(obj);
+      size_t size = obj->object_size_for(fcd);
       // Did we start compacting? If so this object is moving.
       GUARANTEE(p != compaction_top, "p must be moving");
       if (!compaction_started) {
@@ -2095,6 +2096,17 @@ inline void ObjectHeap::compute_new_object_locations() {
         }
       }
 #endif
+      // Clear interior bitvector bits for execution stacks.
+      // During marking, objects referenced from stack frames get their bits
+      // set. If those objects happen to reside within the execution stack's
+      // own heap region (interior pointers), their bits would confuse Phase 3
+      // (write_barrier_oops_update_moving_object_interior_pointers) which
+      // expects all bits to correspond to encoded (klass-forwarded) objects.
+      if (fcd->instance_size_as_jint() == -17 && size > (size_t)sizeof(OopDesc)) {
+        OopDesc** interior_start = p + (sizeof(OopDesc) / sizeof(OopDesc*));
+        OopDesc** interior_end = DERIVED(OopDesc**, p, size);
+        clear_bit_range(interior_start, interior_end);
+      }
       // size is in bytes rather than words
       compaction_top = DERIVED(OopDesc**, compaction_top, size);
       p              = DERIVED(OopDesc**, p, size);
@@ -3412,17 +3424,24 @@ inline FarClassDesc* ObjectHeap::decode_far_class_with_real_near(OopDesc* obj)
   OopDesc* n = obj->klass();
   GUARANTEE(contains(n) || ROM::system_contains(n), "must be valid near");
   // Near's near pointer 'f' is encoded if near 'n' >= compaction_start
-  // but < current scanning location
-  OopDesc* f = ((OopDesc**)n >= _compaction_start && n < obj)
-             ? decode_near(n)
-             : n->klass();
+  // but < current scanning location AND near 'n' is actually alive
+  // (i.e. was visited by the compaction scan and had its klass encoded).
+  // Dead objects in the moving range are skipped by the scan, so their
+  // klass fields remain raw -- calling decode_near on them is wrong.
+  OopDesc* f;
+  if ((OopDesc**)n >= _compaction_start && n < obj
+      && contains(n) && test_bit_for((OopDesc**)n)) {
+    f = decode_near(n);
+  } else {
+    f = n->klass();
+  }
   GUARANTEE(contains(f) || ROM::system_contains(f), "must be in valid near");
   return (FarClassDesc*) f;
 }
 
 inline FarClassDesc*
 ObjectHeap::decode_far_class_with_encoded_near(OopDesc* obj, 
-                                               const QuickVars& qv) {
+                                                const QuickVars& qv) {
   GUARANTEE(contains(obj), "must be in heap");
   // Near pointer is encoded if obj is gte compaction_start
   OopDesc* n = ((OopDesc**)obj >= qv.compaction_start &&
@@ -3430,8 +3449,10 @@ ObjectHeap::decode_far_class_with_encoded_near(OopDesc* obj,
                ? decode_near(obj, qv) : obj->klass();
   GUARANTEE(contains(n) || ROM::system_contains(n), "must be valid near");
   // Near's near pointer is encoded if near is gte compaction_start
+  // AND near is actually alive (dead nears were skipped and not encoded)
   n = ((OopDesc**)n >= qv.compaction_start &&
-       (OopDesc**)n <  qv.collection_area_end)
+       (OopDesc**)n <  qv.collection_area_end
+       && contains(n) && test_bit_for((OopDesc**)n))
     ? decode_near(n, qv) : n->klass();
   GUARANTEE(contains(n) || ROM::system_contains(n), "must be valid near");
   return (FarClassDesc*) n;

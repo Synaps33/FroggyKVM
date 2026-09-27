@@ -697,20 +697,23 @@ gx_draw_rgb(const jshort *clip,
                     // Pixel has no alpha or no transparency
                     *pdst = GXJ_RGB24TORGB16(value);
                 } else if (alpha != 0) {
-                    	   /*
-                    	   jint background = GXJ_RGB16TORGB24(*pdst);
-                        jint composition = alphaComposition(value, background);
-                        *pdst = GXJ_RGB24TORGB16(composition);
-                        */
-                        register unsigned short background = *pdst;
-                    	   register unsigned char alpha1 = 0xff - alpha;
-                    	   register unsigned short r = alpha_table[(value & 0x00F80000) >> 19][alpha] + alpha_table[background & 0x1F][alpha1];
-                    	   register unsigned short g = alpha_table[(value & 0x0000FC00) >> 10][alpha] + alpha_table[(background >> 5) & 0x3F][alpha1];
-                    	   register unsigned short b = alpha_table[(value & 0x000000F8) >> 3][alpha] + alpha_table[background >> 11][alpha1];
-                        if (r > 0x1F) r = 0x1F;
-                        if (g > 0x3F) g = 0x3F;
-                        if (b > 0x1F) b = 0x1F;
-                    	   *pdst = (b << 11) | (g << 5) | r;                    
+                    register unsigned short background = *pdst;
+                    register unsigned int a = alpha;
+                    register unsigned int a1 = 255 - a;
+
+                    register unsigned int vr = (value >> 19) & 0x1F;
+                    register unsigned int vg = (value >> 10) & 0x3F;
+                    register unsigned int vb = (value >> 3) & 0x1F;
+
+                    register unsigned int br = background & 0x1F;
+                    register unsigned int bg = (background >> 5) & 0x3F;
+                    register unsigned int bb = (background >> 11) & 0x1F;
+
+                    register unsigned int r = (vr * a + br * a1 + 128) >> 8;
+                    register unsigned int g = (vg * a + bg * a1 + 128) >> 8;
+                    register unsigned int b = (vb * a + bb * a1 + 128) >> 8;
+
+                    *pdst = (b << 11) | (g << 5) | r;
                 }
                 pdst++;
             } /* loop by rgb data columns */
@@ -1152,12 +1155,40 @@ extern void fast_pixel_set(unsigned * mem, unsigned value, int number_of_pixels)
 #else
 void fast_pixel_set(unsigned * mem, unsigned value, int number_of_pixels)
 {
-   int i;
-   gxj_pixel_type* pBuf = (gxj_pixel_type*)mem;
+    if (number_of_pixels <= 0) return;
+    gxj_pixel_type* pBuf = (gxj_pixel_type*)mem;
+    gxj_pixel_type val16 = (gxj_pixel_type)value;
 
-   for (i = 0; i < number_of_pixels; ++i) {
-      *(pBuf + i) = (gxj_pixel_type)value;
-   }
+    /* Align to 32-bit (4-byte) boundary */
+    if (((unsigned long)pBuf & 2) && number_of_pixels > 0) {
+        *pBuf++ = val16;
+        number_of_pixels--;
+    }
+
+    unsigned int val32 = ((unsigned int)val16 << 16) | val16;
+    unsigned int *p32 = (unsigned int *)pBuf;
+
+    while (number_of_pixels >= 16) {
+        p32[0] = val32;
+        p32[1] = val32;
+        p32[2] = val32;
+        p32[3] = val32;
+        p32[4] = val32;
+        p32[5] = val32;
+        p32[6] = val32;
+        p32[7] = val32;
+        p32 += 8;
+        number_of_pixels -= 16;
+    }
+
+    while (number_of_pixels >= 2) {
+        *p32++ = val32;
+        number_of_pixels -= 2;
+    }
+
+    if (number_of_pixels > 0) {
+        *(gxj_pixel_type*)p32 = val16;
+    }
 }
 #endif
 

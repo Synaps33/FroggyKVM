@@ -482,7 +482,7 @@ public class Display {
      * <code>true</code>, if the <code>Display</code> is the foreground
      * object.
      */
-    boolean hasForeground; //  = false;
+    boolean hasForeground = true;
 
 
 /*

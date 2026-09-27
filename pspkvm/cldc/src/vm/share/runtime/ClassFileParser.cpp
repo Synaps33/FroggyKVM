@@ -1807,7 +1807,7 @@ inline void ClassFileParser::resolve_invoke_special_virtual_conflicts(
 
 ReturnOop ClassFileParser::parse_class_internal(ClassParserState *stack JVM_TRAPS) {
   UsingFastOops fast_oops;
-  tty->print_cr("[GB300-DEBUG] parse_class_internal entered");
+  // tty->print_cr("[GB300-DEBUG] parse_class_internal entered");
   check_for_circular_class_parsing(stack JVM_CHECK_0);
   
   ClassParserState::Fast state = stack->top();

@@ -30,8 +30,11 @@
 #include "javacall_properties.h"
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 
 void gb300_video_flush(const unsigned short *src, int src_w, int src_h, int src_pitch);
+void javacall_printf(const char *format, ...);
+static inline void sceGuDisplay(int x) { (void)x; }
 
 #ifdef __cplusplus
 extern "C" {
@@ -41,7 +44,7 @@ extern const unsigned short DukeTango[];
 
 static unsigned short* vram = (unsigned short*) (0x40000000 | 0x04000000);
 
-static int vscr_w = 240;
+static int vscr_w = 320;
 static int vscr_h = 240;
 
 static int resized = 0;
@@ -209,7 +212,18 @@ static void advancedBlit(int sx, int sy, int sw, int sh, int dx, int dy, int dw,
  * @retval JAVACALL_OK      success
  * @retval JAVACALL_FAIL    fail
  */
+void javacall_lcd_set_resolution(int w, int h) {
+    if (w > 0 && h > 0 && w <= 512 && h <= 512) {
+        vscr_w = w;
+        vscr_h = h;
+    }
+}
+
 javacall_result javacall_lcd_init(void) {
+       const char *ew = getenv("FROGGY_WIDTH");
+       const char *eh = getenv("FROGGY_HEIGHT");
+       if (ew && atoi(ew) > 0) vscr_w = atoi(ew);
+       if (eh && atoi(eh) > 0) vscr_h = atoi(eh);
        memset(_offscreen, 0, sizeof(_offscreen));
        if (fit_scr == -1) {
            char* result;

@@ -146,6 +146,13 @@ MIDP_ERROR imgdcd_image_get_info(unsigned char *imgBuf,
         /* Reach here means we didn't find Marker */
 
         return MIDP_ERROR_IMAGE_CORRUPTED;
+    } else if ((length >= 10) &&
+               (memcmp(imgBuf, "GIF87a", 6) == 0 || memcmp(imgBuf, "GIF89a", 6) == 0)) {
+        *format = IMGDCD_IMAGE_FORMAT_GIF;
+        /* Little endian in GIF logical screen descriptor */
+        *width  = imgBuf[6] | (imgBuf[7] << 8);
+        *height = imgBuf[8] | (imgBuf[9] << 8);
+        return MIDP_ERROR_NONE;
     } else {
         *format = IMGDCD_IMAGE_FORMAT_UNSUPPORTED;
         return MIDP_ERROR_UNSUPPORTED;
