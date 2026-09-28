@@ -224,6 +224,9 @@ retro_video_refresh_t gb300_get_video_cb(void) {
 /* Called by the Java VM whenever waiting for events or yielding CPU */
 extern void gb300_check_timers(void);
 
+/* Hard flag ensuring multicore skips pause menu entirely for J2ME */
+int g_is_j2me_core = 1;
+
 void gb300_poll_events(void) {
     /* 0. Dispatch software timers */
     gb300_check_timers();
@@ -236,9 +239,13 @@ void gb300_poll_events(void) {
     uint32_t buttons = poll_gb300_buttons();
     gb300_input_poll(buttons);
 
-    /* 2. Check exit hotkey: SELECT + START */
+    /* 2. Check exit hotkey: SELECT + START.
+     * Unwind JavaTask via longjmp so control returns to the stock firmware.
+     * The firmware run_emulator loop then sees g_joy_task_state==9 and calls
+     * dummy_run_emulator_menu() (patched by multicore), which unloads/deinits
+     * this core and relaunches the FrogUI menu core via run_game(). */
     if ((buttons & (PSP_CTRL_SELECT | PSP_CTRL_START)) == (PSP_CTRL_SELECT | PSP_CTRL_START)) {
-        xlog("[PSPKVM-GB300] Exit hotkey (SELECT+START) pressed. Requesting graceful shutdown.\n");
+        xlog("[PSPKVM-GB300] Exit hotkey pressed. Longjmp to exit JavaTask.\n");
         s_exit_requested = 1;
         if (s_can_exit_jmp) {
             longjmp(s_exit_jmp, 1);
@@ -340,27 +347,14 @@ RETRO_API void retro_run(void) {
         }
 
         if (s_exit_requested) {
-            xlog("[PSPKVM-GB300] Triggering multicore shutdown_game()...\n");
-            if (environ_cb) {
-                environ_cb(RETRO_ENVIRONMENT_SHUTDOWN, NULL);
-            } else {
-#if defined(SF2000) || defined(__mips__)
-                shutdown_game();
-#endif
-            }
+            dly_tsk(16);
             return;
         }
 
-        /* Show error/exit screen so user knows the JVM stopped */
+        /* JVM finished normally (game ended) */
         gb300_hacker_exit(0);
-
-        if (environ_cb) {
-            environ_cb(RETRO_ENVIRONMENT_SHUTDOWN, NULL);
-        } else {
-#if defined(SF2000) || defined(__mips__)
-            shutdown_game();
-#endif
-        }
+        s_exit_requested = 1;
+        dly_tsk(16);
         return;
     }
 
@@ -374,7 +368,10 @@ RETRO_API void retro_run(void) {
     gb300_jvm_yield();
 }
 
-RETRO_API void retro_reset(void) {}
+RETRO_API void retro_reset(void) {
+    /* Prevent reset crash from any unexpected menu interaction */
+    xlog("[PSPKVM-GB300] retro_reset triggered: IGNORING.\n");
+}
 
 void reportToLog(int severity, int channelID, char* message, ...) {
     (void)severity; (void)channelID; (void)message;
