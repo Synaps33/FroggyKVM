@@ -1,0 +1,8 @@
+Local changes vs upstream (https://github.com/rmn20/MascotME):
+
+- src/com/mascotcapsule/micro3d/v3/MascotME.java:
+    useArrayCopyClear: false -> true
+    overwrite2D:      false -> true
+  Both are safe performance hacks (see INI-CONFIG.md) and are enabled by
+  default for the GB300/SF2000 build. Per-game overrides still work via a
+  mascotme.ini placed in the game JAR root.
