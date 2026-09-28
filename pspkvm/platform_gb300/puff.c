@@ -171,8 +171,32 @@ static int codes(struct state *s, const struct huffman *lencode, const struct hu
     return 0;
 }
 
-static int dynamic(struct state *s) {
-    int nlen, ndist, ncode;
+static int fixed(struct state *s) {
+    short lencode_lengths[FIXLCODES];
+    short distcode_lengths[MAXDCODES];
+    short lencnt[MAXBITS+1], lensym[FIXLCODES];
+    short distcnt[MAXBITS+1], distsym[MAXDCODES];
+    struct huffman lencode, distcode;
+    int symbol;
+
+    /* RFC 1951 fixed literal/length code lengths */
+    for (symbol = 0; symbol < 144; symbol++) lencode_lengths[symbol] = 8;
+    for (; symbol < 256; symbol++) lencode_lengths[symbol] = 9;
+    for (; symbol < 280; symbol++) lencode_lengths[symbol] = 7;
+    for (; symbol < FIXLCODES; symbol++) lencode_lengths[symbol] = 8;
+    for (symbol = 0; symbol < MAXDCODES; symbol++) distcode_lengths[symbol] = 5;
+
+    lencode.count = lencnt;
+    lencode.symbol = lensym;
+    distcode.count = distcnt;
+    distcode.symbol = distsym;
+
+    if (construct(&lencode, lencode_lengths, FIXLCODES) != 0) return -4;
+    if (construct(&distcode, distcode_lengths, MAXDCODES) < 0) return -8;
+    return codes(s, &lencode, &distcode);
+}
+
+static int dynamic(struct state *s) {    int nlen, ndist, ncode;
     short lengths[MAXCODES];
     short lencnt[MAXBITS+1], lensym[MAXLCODES];
     short distcnt[MAXBITS+1], distsym[MAXDCODES];
@@ -236,6 +260,7 @@ int puff(unsigned char *dest, unsigned long *destlen, const unsigned char *sourc
         last = bits(&s, 1);
         type = bits(&s, 2);
         if (type == 0) err = stored(&s);
+        else if (type == 1) err = fixed(&s);
         else if (type == 2) err = dynamic(&s);
         else err = -1;
         if (err != 0) break;

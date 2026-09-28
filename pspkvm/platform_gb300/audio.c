@@ -97,7 +97,8 @@ typedef struct {
     unsigned char *raw;      /* accumulated source data */
     int rawLen;
     int rawTruncated;
-    int16_t *pcm;            /* decoded: WAV_PCM_RATE Hz, stereo interleaved */
+    int16_t *pcm;            /* decoded: WAV_PCM_RATE Hz, interleaved */
+    int channels;            /* channels of pcm (1 or 2) */
     int pcmFrames;
     int pos;
     int playing;
@@ -118,7 +119,8 @@ static wav_player_t *wav_get(int handle) {
 
 static void wav_unload(wav_player_t *p) {
     if (p->raw) { g_wav_raw_total -= p->rawLen; free(p->raw); p->raw = NULL; }
-    if (p->pcm) { g_wav_pcm_total -= p->pcmFrames * 4; free(p->pcm); p->pcm = NULL; }
+    if (p->pcm) { g_wav_pcm_total -= p->pcmFrames * p->channels * 2; free(p->pcm); p->pcm = NULL; }
+    p->channels = 2;
     p->rawLen = 0;
     p->rawTruncated = 0;
     p->pcmFrames = 0;
@@ -241,8 +243,310 @@ static int wav_decode_adpcm(wav_player_t *p, unsigned char *data, int dataLen,
 
     free(src);
     p->pcmFrames = outFrames;
+    p->channels = 2;
     g_wav_pcm_total += outFrames * 4;
     p->durationMs = (int)(((int64_t)totalFrames * 1000) / rate);
+    return 1;
+}
+
+/* ===================== MIDI (Standard MIDI File) playback =====================
+ * Games using "audio/midi" players send us an SMF. We parse the events and
+ * render the whole song once to 22050 Hz mono PCM with a small software synth
+ * (16 voices, 4 waveforms, simple envelopes). The rendered buffer is played
+ * through the same player/mixer path as WAV sounds.
+ */
+#define MIDI_MAX_VOICES 16
+#define MIDI_MAX_EVENTS 65536
+
+typedef struct {
+    int tick;
+    unsigned char type;     /* 0x80 note off, 0x90 note on, 0xB0 cc, 0xC0 prog, 0xFF meta */
+    unsigned char ch;
+    unsigned char d1, d2;
+    int value;              /* tempo for 0xFF 0x51 */
+} midi_event_t;
+
+typedef struct {
+    int note, ch, prog;
+    int gain;               /* 0..127 */
+    int active;
+    int release;
+    uint32_t phase;
+    uint32_t inc;
+    int32_t env;            /* 0..32767 */
+    int wave;
+    int order;
+} midi_voice_t;
+
+static int8_t midi_wave[4][256];
+static int midi_wave_ready = 0;
+
+static void midi_init_waves(void) {
+    int i;
+    if (midi_wave_ready) return;
+    midi_wave_ready = 1;
+    for (i = 0; i < 256; i++) {
+        /* sine (fast parabola approximation, no libm needed) */
+        double x = (double)i / 256.0;
+        double v;
+        if (x < 0.5) {
+            v = 4.0 * x * (1.0 - x);
+            v = 0.775 * v + 0.225 * v * v;
+        } else {
+            double y = 2.0 * x - 1.0;
+            double w = 1.0 - y;
+            double q = 4.0 * w * (1.0 - w);
+            q = 0.775 * q + 0.225 * q * q;
+            v = -q;
+        }
+        midi_wave[0][i] = (int8_t)(v * 120.0);
+        /* triangle */
+        if (i < 128) midi_wave[1][i] = (int8_t)((i * 2 - 128) * 120 / 128);
+        else midi_wave[1][i] = (int8_t)((384 - i * 2) * 120 / 128);
+        /* square */
+        midi_wave[2][i] = (i < 128) ? 120 : -120;
+        /* saw */
+        midi_wave[3][i] = (int8_t)(((i - 128) * 120) / 128);
+    }
+}
+
+static int midi_prog_wave(int prog) {
+    if (prog < 8) return 1;      /* piano */
+    if (prog < 16) return 0;     /* chromatic percussion */
+    if (prog < 24) return 2;     /* organ */
+    if (prog < 32) return 3;     /* guitar */
+    if (prog < 40) return 0;     /* bass */
+    if (prog < 56) return 3;     /* strings */
+    if (prog < 64) return 2;     /* brass */
+    if (prog < 72) return 2;     /* reed */
+    if (prog < 80) return 0;     /* pipe */
+    if (prog < 88) return 3;     /* synth lead */
+    if (prog < 96) return 1;     /* synth pad */
+    return 0;
+}
+
+static int midi_vlq(unsigned char *d, int *pos, int end) {
+    int value = 0;
+    while (*pos < end) {
+        int b = d[(*pos)++];
+        value = (value << 7) | (b & 0x7F);
+        if (!(b & 0x80)) break;
+    }
+    return value;
+}
+
+static int midi_cmp(const void *a, const void *b) {
+    int ta = ((const midi_event_t *)a)->tick;
+    int tb = ((const midi_event_t *)b)->tick;
+    return (ta > tb) - (ta < tb);
+}
+
+static void midi_add_event(midi_event_t **pev, int *pnev, int *pcap, int tick,
+                           int type, int ch, int d1, int d2, int value) {
+    midi_event_t *ev = *pev;
+    if (*pnev >= *pcap) {
+        int newcap = (*pcap < MIDI_MAX_EVENTS) ? (*pcap * 2) : *pcap;
+        midi_event_t *np;
+        if (newcap > MIDI_MAX_EVENTS) newcap = MIDI_MAX_EVENTS;
+        if (newcap == *pcap) return;   /* full: drop */
+        np = (midi_event_t *)realloc(ev, sizeof(midi_event_t) * newcap);
+        if (!np) return;
+        *pev = ev = np;
+        *pcap = newcap;
+    }
+    ev[*pnev].tick = tick;
+    ev[*pnev].type = (unsigned char)type;
+    ev[*pnev].ch = (unsigned char)ch;
+    ev[*pnev].d1 = (unsigned char)d1;
+    ev[*pnev].d2 = (unsigned char)d2;
+    ev[*pnev].value = value;
+    (*pnev)++;
+}
+
+static void midi_synth(midi_voice_t *voices, int16_t *out, int frames) {
+    int i, j;
+    for (i = 0; i < frames; i++) {
+        int32_t acc = 0;
+        for (j = 0; j < MIDI_MAX_VOICES; j++) {
+            midi_voice_t *v = &voices[j];
+            if (!v->active) continue;
+            acc += (int32_t)midi_wave[v->wave][(v->phase >> 16) & 0xFF] * (v->env >> 8) * v->gain;
+            if (!v->release) {
+                if (v->env < 32767) {
+                    v->env += 400;
+                    if (v->env > 32767) v->env = 32767;
+                }
+            } else {
+                v->env -= 40;
+                if (v->env <= 0) {
+                    v->env = 0;
+                    v->active = 0;
+                }
+            }
+            v->phase += v->inc;
+        }
+        acc >>= 7;
+        if (acc > 32767) acc = 32767;
+        else if (acc < -32768) acc = -32768;
+        out[i] = (int16_t)acc;
+    }
+}
+
+/* Render an SMF to 22050 Hz mono PCM. Returns 1 on success. */
+static int midi_render(wav_player_t *p) {
+    unsigned char *d = p->raw;
+    int n = p->rawLen;
+    int hlen, ntrks, division, pos, i, j;
+    int nev = 0, evcap = 4096;
+    midi_event_t *ev;
+    midi_voice_t voices[MIDI_MAX_VOICES];
+    int chanProg[16], chanVol[16], chanExpr[16];
+    int16_t *out;
+    int budget, outCap, outPos = 0, order = 0;
+    int64_t curTick = 0, tempo = 500000;
+
+    if (!d || n < 14 || memcmp(d, "MThd", 4) != 0) return 0;
+    hlen = (d[4] << 24) | (d[5] << 16) | (d[6] << 8) | d[7];
+    if (hlen < 6 || 8 + hlen > n) return 0;
+    ntrks = (d[10] << 8) | d[11];
+    division = (d[12] << 8) | d[13];
+    if (division <= 0 || (division & 0x8000)) return 0;   /* PPQN only */
+
+    ev = (midi_event_t *)malloc(sizeof(midi_event_t) * evcap);
+    if (!ev) return 0;
+
+    pos = 8 + hlen;
+    for (i = 0; i < ntrks && pos + 8 <= n; i++) {
+        int tlen, tend, tick = 0, running = 0;
+        if (memcmp(d + pos, "MTrk", 4) != 0) break;
+        tlen = (d[pos + 4] << 24) | (d[pos + 5] << 16) | (d[pos + 6] << 8) | d[pos + 7];
+        pos += 8;
+        tend = pos + tlen;
+        if (tend > n) tend = n;
+        while (pos < tend) {
+            int delta = midi_vlq(d, &pos, tend);
+            int status;
+            tick += delta;
+            if (pos >= tend) break;
+            status = d[pos];
+            if (status & 0x80) { pos++; running = status; } else { status = running; }
+            if (status == 0xFF) {
+                int mtype, mlen;
+                if (pos >= tend) break;
+                mtype = d[pos++];
+                mlen = midi_vlq(d, &pos, tend);
+                if (mtype == 0x51 && mlen == 3 && pos + 3 <= tend) {
+                    int tempoVal = (d[pos] << 16) | (d[pos + 1] << 8) | d[pos + 2];
+                    midi_add_event(&ev, &nev, &evcap, tick, 0xFF, 0, 0x51, 0, tempoVal);
+                }
+                pos += mlen;
+            } else if (status == 0xF0 || status == 0xF7) {
+                int slen = midi_vlq(d, &pos, tend);
+                pos += slen;
+            } else {
+                int type = status & 0xF0;
+                int ch = status & 0x0F;
+                if (type == 0xC0 || type == 0xD0) {
+                    int d1 = (pos < tend) ? d[pos++] : 0;
+                    if (type == 0xC0) {
+                        midi_add_event(&ev, &nev, &evcap, tick, 0xC0, ch, d1, 0, 0);
+                    }
+                } else {
+                    int d1 = (pos < tend) ? d[pos++] : 0;
+                    int d2 = (pos < tend) ? d[pos++] : 0;
+                    if (type == 0x90 && d2 > 0) {
+                        midi_add_event(&ev, &nev, &evcap, tick, 0x90, ch, d1, d2, 0);
+                    } else if (type == 0x80 || (type == 0x90 && d2 == 0)) {
+                        midi_add_event(&ev, &nev, &evcap, tick, 0x80, ch, d1, 0, 0);
+                    } else if (type == 0xB0) {
+                        midi_add_event(&ev, &nev, &evcap, tick, 0xB0, ch, d1, d2, 0);
+                    }
+                }
+            }
+        }
+        pos = tend;
+    }
+
+    if (nev <= 0) { free(ev); return 0; }
+    qsort(ev, nev, sizeof(midi_event_t), midi_cmp);
+
+    midi_init_waves();
+    for (i = 0; i < MIDI_MAX_VOICES; i++) memset(&voices[i], 0, sizeof(midi_voice_t));
+    for (i = 0; i < 16; i++) { chanProg[i] = 0; chanVol[i] = 100; chanExpr[i] = 127; }
+
+    budget = WAV_MAX_PCM_TOTAL - g_wav_pcm_total;
+    outCap = budget / 2;                                  /* mono s16 */
+    if (outCap > WAV_PCM_RATE * 300) outCap = WAV_PCM_RATE * 300;   /* 5 min cap */
+    if (outCap <= 0) { free(ev); return 0; }
+    out = (int16_t *)malloc((size_t)outCap * 2);
+    if (!out) { free(ev); return 0; }
+
+    for (i = 0; i < nev && outPos < outCap; i++) {
+        midi_event_t *e = &ev[i];
+        int64_t target = outPos + (int64_t)(e->tick - curTick) * tempo * WAV_PCM_RATE /
+                                   (1000000LL * division);
+        if (target > outCap) target = outCap;
+        if (target > outPos) {
+            midi_synth(voices, out + outPos, (int)(target - outPos));
+            outPos = (int)target;
+        }
+        curTick = e->tick;
+
+        if (e->type == 0xFF) {
+            if (e->d1 == 0x51 && e->value > 0) tempo = e->value;
+        } else if (e->type == 0x90) {
+            int ch = e->ch, note = e->d1 & 0x7F, vel = e->d2 & 0x7F;
+            midi_voice_t *v = NULL;
+            for (j = 0; j < MIDI_MAX_VOICES; j++) {
+                if (voices[j].active && voices[j].ch == ch && voices[j].note == note) { v = &voices[j]; break; }
+            }
+            if (!v) for (j = 0; j < MIDI_MAX_VOICES; j++) {
+                if (!voices[j].active) { v = &voices[j]; break; }
+            }
+            if (!v) {
+                int best = 0;
+                for (j = 1; j < MIDI_MAX_VOICES; j++) {
+                    if (voices[j].order < voices[best].order) best = j;
+                }
+                v = &voices[best];
+            }
+            v->gain = (vel * chanVol[ch] * chanExpr[ch]) / (127 * 127);
+            if (v->gain > 127) v->gain = 127;
+            if (v->gain < 0) v->gain = 0;
+            v->note = note;
+            v->ch = ch;
+            v->prog = chanProg[ch];
+            v->wave = (ch == 9) ? 2 : midi_prog_wave(chanProg[ch]);
+            v->phase = 0;
+            v->inc = midi_note_phase_step[note];
+            v->env = 0;
+            v->release = 0;
+            v->active = 1;
+            v->order = order++;
+        } else if (e->type == 0x80) {
+            int ch = e->ch, note = e->d1 & 0x7F;
+            for (j = 0; j < MIDI_MAX_VOICES; j++) {
+                if (voices[j].active && voices[j].ch == ch && voices[j].note == note) {
+                    voices[j].release = 1;
+                }
+            }
+        } else if (e->type == 0xC0) {
+            chanProg[e->ch & 0x0F] = e->d1 & 0x7F;
+        } else if (e->type == 0xB0) {
+            int cc = e->d1 & 0x7F, val = e->d2 & 0x7F;
+            if (cc == 7) chanVol[e->ch & 0x0F] = val;
+            else if (cc == 11) chanExpr[e->ch & 0x0F] = val;
+        }
+    }
+
+    free(ev);
+    if (outPos <= 0) { free(out); return 0; }
+    p->pcm = out;
+    p->pcmFrames = outPos;
+    p->channels = 1;
+    g_wav_pcm_total += outPos * 2;
+    p->durationMs = (int)(((int64_t)outPos * 1000) / WAV_PCM_RATE);
+    xlog("[AUDIO] MIDI rendered: %d frames (%d ms, %d events)\n", outPos, p->durationMs, nev);
     return 1;
 }
 
@@ -338,6 +642,7 @@ static int wav_decode(wav_player_t *p) {
         }
 
         p->pcmFrames = outFrames;
+        p->channels = 2;
         g_wav_pcm_total += outFrames * 4;
         p->durationMs = (int)(((int64_t)srcFrames * 1000) / rate);
         return 1;
@@ -351,8 +656,10 @@ static void wav_mix_frame(int32_t *l, int32_t *r) {
         wav_player_t *p = &g_wav[i];
         if (p->used && p->playing && !p->paused && p->pcm && p->pos < p->pcmFrames) {
             int vol = p->muted ? 0 : p->volume;
-            *l += ((int)p->pcm[p->pos * 2]     * vol) / 100;
-            *r += ((int)p->pcm[p->pos * 2 + 1] * vol) / 100;
+            int sl = p->pcm[p->pos * p->channels];
+            int sr = (p->channels > 1) ? p->pcm[p->pos * p->channels + 1] : sl;
+            *l += (sl * vol) / 100;
+            *r += (sr * vol) / 100;
             if (++p->pos >= p->pcmFrames) {
                 p->playing = 0;
                 p->pos = 0;
@@ -538,7 +845,11 @@ Java_com_sun_mmedia_DirectPlayer_nBuffering(void) {
     if (bytes < 0) {
         /* end of stream: decode and drop the raw data */
         if (p->raw && !p->pcm) {
-            if (!wav_decode(p)) {
+            if (p->rawLen >= 4 && memcmp(p->raw, "MThd", 4) == 0) {
+                if (!midi_render(p)) {
+                    xlog("[AUDIO] handle %d: MIDI render failed (%d bytes)\n", handle, p->rawLen);
+                }
+            } else if (!wav_decode(p)) {
                 xlog("[AUDIO] handle %d: unsupported audio (%d bytes, truncated=%d, mime='%s')\n",
                      handle, p->rawLen, p->rawTruncated, p->mime);
             }
