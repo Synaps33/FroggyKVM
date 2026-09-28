@@ -259,6 +259,66 @@ KNIDECL(com_sun_midp_io_j2me_storage_File_renameStorage) {
     KNI_ReturnVoid();
 }
 
+/*
+ * Serves MIDP Chameleon skin image resources to ResourceHandler.
+ * The Java side asks for names like "screen_image_wash_png" (dots from the
+ * original file name are replaced by underscores). We load them from the SD
+ * card (or /tmp for desktop testing) and hand them back as a byte[].
+ * Also acts as a proper NULL return for anything not found - returning a
+ * garbage KNI handle here used to break the skin loader with
+ * ArrayIndexOutOfBoundsException.
+ */
+KNIEXPORT KNI_RETURNTYPE_OBJECT
+KNIDECL(com_sun_midp_util_ResourceHandler_loadRomizedResource0) {
+    KNI_StartHandles(2);
+    KNI_DeclareHandle(hName);
+    KNI_DeclareHandle(hReturnArray);
+    KNI_GetParameterAsObject(1, hName);
+    KNI_ReleaseHandle(hReturnArray);
+
+    if (!KNI_IsNullHandle(hName)) {
+        jsize len = KNI_GetStringLength(hName);
+        if (len > 0 && len < 200) {
+            char name[224];
+            jchar ubuf[224];
+            KNI_GetStringRegion(hName, 0, len, ubuf);
+            for (int i = 0; i < len; i++) name[i] = (char)(ubuf[i] & 0x7F);
+            name[len] = '\0';
+
+            static const char *dirs[] = {
+                "/mnt/sda1/system/skin/",
+                "/tmp/",
+                NULL
+            };
+            for (int d = 0; dirs[d] != NULL; d++) {
+                char path[400];
+                snprintf(path, sizeof(path), "%s%s", dirs[d], name);
+                FILE *f = fopen(path, "rb");
+                if (!f) continue;
+                fseek(f, 0, SEEK_END);
+                long sz = ftell(f);
+                fseek(f, 0, SEEK_SET);
+                if (sz > 0 && sz < (1024 * 1024)) {
+                    unsigned char *buf = (unsigned char *)malloc((size_t)sz);
+                    if (buf != NULL) {
+                        size_t rd = fread(buf, 1, (size_t)sz, f);
+                        if (rd == (size_t)sz) {
+                            SNI_NewArray(SNI_BYTE_ARRAY, (jsize)sz, hReturnArray);
+                            if (!KNI_IsNullHandle(hReturnArray)) {
+                                KNI_SetRawArrayRegion(hReturnArray, 0, (jsize)sz, (jbyte *)buf);
+                            }
+                        }
+                        free(buf);
+                    }
+                }
+                fclose(f);
+                break;
+            }
+        }
+    }
+    KNI_EndHandlesAndReturnObject(hReturnArray);
+}
+
 KNIEXPORT KNI_RETURNTYPE_VOID
 KNIDECL(com_sun_midp_log_LoggingBase_report) {
     jint severity = KNI_GetParameterAsInt(1);

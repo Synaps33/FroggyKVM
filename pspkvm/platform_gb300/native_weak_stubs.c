@@ -342,7 +342,7 @@ void Java_com_sun_midp_midletsuite_SuiteSettings_save0() __attribute__((weak, al
 void Java_com_sun_midp_suspend_SuspendSystem_00024MIDPSystem_allMidletsKilled() __attribute__((weak, alias("java_unimplemented_stub")));
 void Java_com_sun_midp_suspend_SuspendSystem_00024MIDPSystem_suspended0() __attribute__((weak, alias("java_unimplemented_stub")));
 void Java_com_sun_midp_suspend_SuspendSystem_isResumePending() __attribute__((weak, alias("java_unimplemented_stub")));
-void Java_com_sun_midp_util_ResourceHandler_loadRomizedResource0() __attribute__((weak, alias("java_unimplemented_stub")));
+/* loadRomizedResource0 is implemented in vm_stubs.c (must return a real NULL) */
 /* MMAPI audio functions implemented in audio.c */
 void Java_com_sun_mmedia_DirectRecord_finalize() __attribute__((weak, alias("java_unimplemented_stub")));
 void Java_com_sun_mmedia_DirectRecord_nClose() __attribute__((weak, alias("java_unimplemented_stub")));
