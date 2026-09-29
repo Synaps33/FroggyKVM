@@ -21,7 +21,7 @@ class VirtualKeyboardInterface {
     public static final boolean USE_VIRTUAL_KEYPAD = false;
 
     /** indicates whether the virtual keyboard is opened automatically */
-    public static boolean USE_VIRTUAL_KEYBOARD_OPEN_AUTO = false;
+    public static boolean USE_VIRTUAL_KEYBOARD_OPEN_AUTO = true;
 
     /**
      * Checks if the virtual keyboard is enabled.

@@ -98,8 +98,8 @@ void JavaTask(void) {
         heapsize = javacall_total_heap_size();
         heapsize -= 1024*1024;
         heapsize -= (heapsize/32);
-        if (heapsize > 48 * 1024 * 1024) {
-            heapsize = 48 * 1024 * 1024;
+        if (heapsize > 32 * 1024 * 1024) {
+            heapsize = 32 * 1024 * 1024;
         }
     }
     JVM_SetConfig(JVM_CONFIG_HEAP_CAPACITY, heapsize);

@@ -184,19 +184,25 @@ static int wav_decode_adpcm(wav_player_t *p, unsigned char *data, int dataLen,
             pred[ch] = (int16_t)(blk[ch * 4] | (blk[ch * 4 + 1] << 8));
             stepi[ch] = blk[ch * 4 + 2];
             if (stepi[ch] > 88) stepi[ch] = 88;
+            src[(b * samplesPerBlock + 0) * channels + ch] = pred[ch];
         }
 
-        for (i = 0; i < samplesPerBlock; i++) {
+        for (i = 1; i < samplesPerBlock; i++) {
             for (ch = 0; ch < channels; ch++) {
-                int ni = i * channels + ch;
-                int byteIdx = sp + ni / 2;
+                int nibIdx = i - 1;
+                int byteIdx;
+                if (channels == 1) {
+                    byteIdx = sp + nibIdx / 2;
+                } else {
+                    byteIdx = sp + (nibIdx / 8) * 8 + ch * 4 + (nibIdx % 8) / 2;
+                }
                 int nib, step, diff;
 
                 if (byteIdx >= blockAlign) {
                     src[(b * samplesPerBlock + i) * channels + ch] = (int16_t)pred[ch];
                     continue;
                 }
-                nib = (ni & 1) ? (blk[byteIdx] >> 4) : (blk[byteIdx] & 0x0F);
+                nib = (nibIdx & 1) ? (blk[byteIdx] >> 4) : (blk[byteIdx] & 0x0F);
                 step = ima_step_table[stepi[ch]];
                 diff = step >> 3;
                 if (nib & 4) diff += step;
