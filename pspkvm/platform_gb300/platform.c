@@ -252,11 +252,23 @@ void gb300_poll_events(void) {
         }
     }
 
-    /* 3. Output audio (22050 Hz / 60 fps ~= 368 frames) */
-    int16_t pcm_samples[368 * 2];
-    int frames_read = gb300_audio_read(pcm_samples, 368);
-    if (audio_batch_cb && frames_read > 0) {
-        audio_batch_cb(pcm_samples, frames_read);
+    /* 3. Output audio dynamically based on elapsed time to prevent crackling */
+    static uint64_t last_audio_time = 0;
+    extern uint64_t gb300_timer_get_us(void);
+    uint64_t now = gb300_timer_get_us();
+    if (last_audio_time == 0 || now < last_audio_time) last_audio_time = now;
+    
+    int64_t delta_us = now - last_audio_time;
+    int frames = (int)((delta_us * 22050) / 1000000LL);
+    
+    if (frames > 0) {
+        if (frames > 2048) frames = 2048; /* cap */
+        static int16_t pcm_samples[2048 * 2];
+        int frames_read = gb300_audio_read(pcm_samples, frames);
+        if (audio_batch_cb && frames_read > 0) {
+            audio_batch_cb(pcm_samples, frames_read);
+        }
+        last_audio_time += (frames * 1000000LL) / 22050;
     }
 }
 

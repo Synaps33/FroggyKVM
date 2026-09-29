@@ -47,6 +47,7 @@ extern "C" {
   extern Bytecodes::Code getstatic(Thread* THREAD);
   extern Bytecodes::Code handle_breakpoint(Thread *thread);
   extern void handle_single_step(Thread *thread);
+  extern "C" void gb300_poll_events(void);
   extern void gb300_check_timers(void);
 
   // external interpreter runtime routines, see InterpreterRuntime_<arch>.cpp
@@ -4682,8 +4683,8 @@ static void Interpret() {
   } else {
     static unsigned int bc_counter = 0;
     for (;;) {
-      if ((++bc_counter & 0x1FFF) == 0) {
-        gb300_check_timers();
+      if ((++bc_counter & 0x7FF) == 0) {
+        gb300_poll_events();
       }
 #ifdef BYTECODE_COUNT
       interpreter_count_table[*g_jpc]++;
