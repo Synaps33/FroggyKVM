@@ -231,44 +231,56 @@ void gb300_poll_events(void) {
     /* 0. Dispatch software timers */
     gb300_check_timers();
 
-    /* 1. Poll input */
-    if (input_poll_cb) input_poll_cb();
-#if defined(SF2000) || defined(__mips__)
-    frontend_check_hotkeys();
-#endif
-    uint32_t buttons = poll_gb300_buttons();
-    gb300_input_poll(buttons);
+    extern uint64_t gb300_timer_get_us(void);
+    uint64_t now = gb300_timer_get_us();
 
-    /* 2. Check exit hotkey: SELECT + START.
-     * Unwind JavaTask via longjmp so control returns to the stock firmware.
-     * The firmware run_emulator loop then sees g_joy_task_state==9 and calls
-     * dummy_run_emulator_menu() (patched by multicore), which unloads/deinits
-     * this core and relaunches the FrogUI menu core via run_game(). */
-    if ((buttons & (PSP_CTRL_SELECT | PSP_CTRL_START)) == (PSP_CTRL_SELECT | PSP_CTRL_START)) {
-        xlog("[PSPKVM-GB300] Exit hotkey pressed. Longjmp to exit JavaTask.\n");
-        s_exit_requested = 1;
-        if (s_can_exit_jmp) {
-            longjmp(s_exit_jmp, 1);
+    /* 1. Poll input, throttled to 60fps (16.6ms) */
+    static uint64_t last_input_time = 0;
+    if (last_input_time == 0 || now - last_input_time >= 16666) {
+        last_input_time = now;
+        
+        if (input_poll_cb) input_poll_cb();
+#if defined(SF2000) || defined(__mips__)
+        frontend_check_hotkeys();
+#endif
+        uint32_t buttons = poll_gb300_buttons();
+        gb300_input_poll(buttons);
+
+        /* 2. Check exit hotkey: SELECT + START. */
+        if ((buttons & (PSP_CTRL_SELECT | PSP_CTRL_START)) == (PSP_CTRL_SELECT | PSP_CTRL_START)) {
+            xlog("[PSPKVM-GB300] Exit hotkey pressed. Longjmp to exit JavaTask.\n");
+            s_exit_requested = 1;
+            if (s_can_exit_jmp) {
+                longjmp(s_exit_jmp, 1);
+            }
         }
     }
 
-    /* 3. Output audio dynamically based on elapsed time to prevent crackling */
+    /* 3. Output audio dynamically, batched to at least ~5ms to avoid overhead */
     static uint64_t last_audio_time = 0;
-    extern uint64_t gb300_timer_get_us(void);
-    uint64_t now = gb300_timer_get_us();
     if (last_audio_time == 0 || now < last_audio_time) last_audio_time = now;
     
     int64_t delta_us = now - last_audio_time;
-    int frames = (int)((delta_us * 22050) / 1000000LL);
+    if (delta_us > 100000) {
+        /* Drop audio debt if game was loading/frozen for >100ms */
+        last_audio_time = now;
+        delta_us = 0;
+    }
     
-    if (frames > 0) {
-        if (frames > 2048) frames = 2048; /* cap */
-        static int16_t pcm_samples[2048 * 2];
-        int frames_read = gb300_audio_read(pcm_samples, frames);
-        if (audio_batch_cb && frames_read > 0) {
-            audio_batch_cb(pcm_samples, frames_read);
+    if (delta_us > 5000) {
+        int frames = (int)((delta_us * 22050) / 1000000LL);
+        if (frames > 0) {
+            if (frames > 2048) {
+                frames = 2048; /* cap */
+                last_audio_time = now - (2048 * 1000000LL) / 22050; /* Snap time to avoid debt accumulation */
+            }
+            static int16_t pcm_samples[2048 * 2];
+            int frames_read = gb300_audio_read(pcm_samples, frames);
+            if (audio_batch_cb && frames_read > 0) {
+                audio_batch_cb(pcm_samples, frames_read);
+            }
+            last_audio_time += (frames * 1000000LL) / 22050;
         }
-        last_audio_time += (frames * 1000000LL) / 22050;
     }
 }
 

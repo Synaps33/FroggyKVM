@@ -9,7 +9,7 @@ ifeq ($(platform), sf2000)
     CC = $(MIPS)gcc
     CXX = $(MIPS)g++
     AR = $(MIPS)ar
-    MIPS_FLAGS = -EL -march=mips32r2 -mtune=mips32r2 -msoft-float -ffast-math -G0 -mno-abicalls -fno-pic -ffreestanding -ffunction-sections -fdata-sections -DSF2000 -DNO_THREADS -DGB300 -DPSP_COMPAT -DPRODUCT=1
+    MIPS_FLAGS = -EL -march=mips32 -mtune=mips32r2 -msoft-float -ffast-math -G0 -mno-abicalls -fno-pic -ffreestanding -ffunction-sections -fdata-sections -DSF2000 -DNO_THREADS -DGB300 -DPSP_COMPAT -DPRODUCT=1
     override CFLAGS += $(MIPS_FLAGS)
     override CXXFLAGS += $(MIPS_FLAGS) -fno-use-cxa-atexit -fno-exceptions -fno-rtti
     STATIC_LINKING = 1
