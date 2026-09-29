@@ -30,7 +30,7 @@
 #include <setjmp.h>
 //#define BYTECODE_COUNT 1
 #if !defined(_DEBUG )
-#define  USE_MIPS_ASM_OPTIMIZED_INTERPRETER 1
+#define  USE_MIPS_ASM_OPTIMIZED_INTERPRETER 0
 #if defined(PRODUCT)
 #define USE_THREADED_MIPS_INTERPRETER 1
 #endif
@@ -256,7 +256,7 @@ extern "C" {
     tty->print_cr("UNIMPLEMENTED BYTECODE: %s\n", #x);          \
     BREAKPOINT;
 
-#if defined(MIPS) && USE_MIPS_ASM_OPTIMIZED_INTERPRETER
+#if (defined(MIPS) || defined(__mips__)) && USE_MIPS_ASM_OPTIMIZED_INTERPRETER
 
 #define REG_JPC "s6"
 #define REG_JSP "s7"
@@ -2520,7 +2520,7 @@ enum {
   }
 
   
-#if !defined(MIPS) || !(USE_MIPS_ASM_OPTIMIZED_INTERPRETER)
+#if !(defined(MIPS) || defined(__mips__)) || !(USE_MIPS_ASM_OPTIMIZED_INTERPRETER)
 
 
   /* bytecodes implementation follows */
