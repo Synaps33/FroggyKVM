@@ -46,7 +46,7 @@ public class MascotME {
 	
 	// Performance hack, high performance impact.
 	// Reduces framebuffer resolution.
-	static boolean halfResRender = false;
+	static boolean halfResRender = true;
 	
 	// Performance hack, high performance impact.
 	// Disables support of 2D graphics inbetween 3D geometry.
@@ -58,7 +58,7 @@ public class MascotME {
 	// Performance hack, medium performance impact.
 	// Disables framebuffer clearing, useful when game fully overwrites framebuffer with geometry.
 	// Please use with overwrite2D for bigger performance win.
-	static boolean doNotClear = false;
+	static boolean doNotClear = true;
 	// Performance hack, medium performance impact.
 	// Enables alternative method to clear framebuffer using System.arraycopy.
 	// Can be faster on Series 40 cellphones.

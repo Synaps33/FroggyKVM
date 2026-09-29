@@ -30,7 +30,7 @@
 #include <setjmp.h>
 //#define BYTECODE_COUNT 1
 #if !defined(_DEBUG )
-#define  USE_MIPS_ASM_OPTIMIZED_INTERPRETER 0
+#define  USE_MIPS_ASM_OPTIMIZED_INTERPRETER 1
 #if defined(PRODUCT)
 #define USE_THREADED_MIPS_INTERPRETER 1
 #endif
