@@ -85,11 +85,11 @@ void gb300_audio_stop_tone(void) {
  * end-of-stream and decode to a fixed 22050 Hz stereo stream, which is then
  * mixed into the core's audio output (gb300_audio_read).
  */
-#define WAV_MAX_PLAYERS 32
+#define WAV_MAX_PLAYERS 64
 #define WAV_PCM_RATE 22050
 #define WAV_MAX_RAW_PER_PLAYER (4 * 1024 * 1024)
-#define WAV_MAX_RAW_TOTAL (6 * 1024 * 1024)
-#define WAV_MAX_PCM_TOTAL (8 * 1024 * 1024)
+#define WAV_MAX_RAW_TOTAL (8 * 1024 * 1024)
+#define WAV_MAX_PCM_TOTAL (12 * 1024 * 1024)
 
 typedef struct {
     int used;
