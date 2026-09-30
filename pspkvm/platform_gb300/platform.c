@@ -69,6 +69,7 @@ static bool jvm_started = false;
 static bool j2me_classes_available(void) {
     static const char *paths[] = {
         FROGGY_SD_ROOT "/cubegm/bios/classes.zip",
+        FROGGY_SD_ROOT "/bios/classes.zip",
         FROGGY_SD_ROOT "/BIOS/classes.zip",
         FROGGY_SD_ROOT "/cubegm/cores/j2me/classes.zip",
         FROGGY_SD_ROOT "/roms/j2me/classes.zip",
@@ -283,7 +284,8 @@ void gb300_poll_events(void) {
         }
     }
 
-    /* 3. Output audio dynamically, batched to at least ~5ms to avoid overhead */
+    /* 3. Feed the frontend in stable, frame-sized batches. The VM can poll
+     * very frequently; 5ms batches underfill the 48kHz device queue. */
     static uint64_t last_audio_time = 0;
     if (last_audio_time == 0 || now < last_audio_time) last_audio_time = now;
     
@@ -294,12 +296,12 @@ void gb300_poll_events(void) {
         delta_us = 0;
     }
     
-    if (delta_us > 5000) {
+    if (delta_us >= 20000) {
         int frames = (int)((delta_us * 22050) / 1000000LL);
         if (frames > 0) {
-            if (frames > 2048) {
-                frames = 2048; /* cap */
-                last_audio_time = now - (2048 * 1000000LL) / 22050; /* Snap time to avoid debt accumulation */
+            if (frames > 1024) {
+                frames = 1024;
+                last_audio_time = now - (1024 * 1000000LL) / 22050;
             }
             static int16_t pcm_samples[2048 * 2];
             int frames_read = gb300_audio_read(pcm_samples, frames);
