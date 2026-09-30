@@ -407,7 +407,9 @@ OBJS = \
 	pspkvm/cldc/src/vm/share/float/Cosine_kernel.o \
 	pspkvm/cldc/src/vm/share/float/Tangent_kernel.o
 
-$(TARGET): $(OBJS) $(FLUIDLITE_STAMP)
+$(FLUIDLITE_OBJS): $(FLUIDLITE_STAMP)
+
+$(TARGET): $(OBJS) $(FLUIDLITE_OBJS)
 ifeq ($(STATIC_LINKING), 1)
 	$(AR) rcs $@ $(OBJS)
 else
