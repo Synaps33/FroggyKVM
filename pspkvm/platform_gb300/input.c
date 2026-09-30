@@ -328,8 +328,8 @@ void gb300_input_load_config(const char *jar_path) {
 
     /* 1. Check game-specific configs in /config/j2me and /configs/j2me */
     const char *config_dirs[] = {
-        "/mnt/sda1/config/j2me",
-        "/mnt/sda1/configs/j2me",
+        FROGGY_SD_ROOT "/config/j2me",
+        FROGGY_SD_ROOT "/configs/j2me",
         "config/j2me",
         "configs/j2me",
         "/media/Sajnaps/GB300/config/j2me",

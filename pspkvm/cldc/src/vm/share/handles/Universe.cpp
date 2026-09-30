@@ -27,6 +27,10 @@
 # include "incls/_precompiled.incl"
 # include "incls/_Universe.cpp.incl"
 
+#ifndef FROGGY_SD_ROOT
+#define FROGGY_SD_ROOT "/mnt/sda1"
+#endif
+
 OopDesc* persistent_handles[Universe::__number_of_persistent_handles];
 
 bool Universe::_is_compilation_allowed = true;
@@ -2290,15 +2294,15 @@ void Universe::create_first_task(const JvmPathChar* classpath JVM_TRAPS) {
   static const char* sys_cp_ascii = NULL;
   if (!sys_cp_ascii) {
     static const char* const candidates[] = {
-        "/mnt/sda1/bios/classes.zip",
-        "/mnt/sda1/BIOS/classes.zip",
+        FROGGY_SD_ROOT "/cubegm/bios/classes.zip",
+        FROGGY_SD_ROOT "/BIOS/classes.zip",
         "/home/Sajnaps/gb300/bios/classes.zip",
         "/home/Sajnaps/gb300/froggykvm/classes.zip",
-        "/mnt/sda1/cores/j2me/classes.zip",
+        FROGGY_SD_ROOT "/cubegm/cores/j2me/classes.zip",
         "bios/classes.zip",
         "classes.zip",
-        "/mnt/sda1/ROMS/J2ME/classes.zip",
-        "/mnt/sda1/ROMS/j2me/classes.zip",
+        FROGGY_SD_ROOT "/roms/J2ME/classes.zip",
+        FROGGY_SD_ROOT "/roms/j2me/classes.zip",
         "/media/Sajnaps/GB300/bios/classes.zip",
         "/media/Sajnaps/GB300/cores/j2me/classes.zip",
         NULL
@@ -2311,7 +2315,7 @@ void Universe::create_first_task(const JvmPathChar* classpath JVM_TRAPS) {
             break;
         }
     }
-    if (!sys_cp_ascii) sys_cp_ascii = "/mnt/sda1/bios/classes.zip";
+    if (!sys_cp_ascii) sys_cp_ascii = FROGGY_SD_ROOT "/cubegm/bios/classes.zip";
   }
   int cp_len = (int)strlen(sys_cp_ascii);
   JvmPathChar sys_cp_unicode[512];

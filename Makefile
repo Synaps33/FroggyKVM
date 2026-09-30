@@ -2,6 +2,42 @@
 NAME    = j2me
 O       = o
 RM      = rm -f
+.DEFAULT_GOAL := all
+
+FLUIDLITE_REV = 1606f724b12ba20c33eca8aef3a16155a4227133
+FLUIDLITE_URL = https://github.com/katyo/fluidlite/archive/$(FLUIDLITE_REV).tar.gz
+FLUIDLITE_SHA256 = 83543805fddb8d5e9bc339b2be1accb38d316bd66b51722444cecc5bb894a7f4
+FLUIDLITE_DIR = build/fluidlite-$(FLUIDLITE_REV)
+FLUIDLITE_ARCHIVE = build/fluidlite-$(FLUIDLITE_REV).tar.gz
+FLUIDLITE_STAMP = $(FLUIDLITE_DIR)/.ready
+FLUIDLITE_OBJS = \
+	$(FLUIDLITE_DIR)/src/fluid_chan.o \
+	$(FLUIDLITE_DIR)/src/fluid_chorus.o \
+	$(FLUIDLITE_DIR)/src/fluid_conv.o \
+	$(FLUIDLITE_DIR)/src/fluid_defsfont.o \
+	$(FLUIDLITE_DIR)/src/fluid_dsp_float.o \
+	$(FLUIDLITE_DIR)/src/fluid_gen.o \
+	$(FLUIDLITE_DIR)/src/fluid_hash.o \
+	$(FLUIDLITE_DIR)/src/fluid_list.o \
+	$(FLUIDLITE_DIR)/src/fluid_mod.o \
+	$(FLUIDLITE_DIR)/src/fluid_rev.o \
+	$(FLUIDLITE_DIR)/src/fluid_settings.o \
+	$(FLUIDLITE_DIR)/src/fluid_synth.o \
+	$(FLUIDLITE_DIR)/src/fluid_sys.o \
+	$(FLUIDLITE_DIR)/src/fluid_tuning.o \
+	$(FLUIDLITE_DIR)/src/fluid_voice.o
+
+$(FLUIDLITE_STAMP):
+	mkdir -p build
+	curl -L --fail --retry 3 -o $(FLUIDLITE_ARCHIVE).tmp $(FLUIDLITE_URL)
+	echo "$(FLUIDLITE_SHA256)  $(FLUIDLITE_ARCHIVE).tmp" | sha256sum -c -
+	rm -rf $(FLUIDLITE_DIR) $(FLUIDLITE_DIR).src
+	mkdir $(FLUIDLITE_DIR).src
+	tar -xzf $(FLUIDLITE_ARCHIVE).tmp -C $(FLUIDLITE_DIR).src --strip-components=1
+	mv $(FLUIDLITE_DIR).src $(FLUIDLITE_DIR)
+	sed -i 's/^#define SF3_SUPPORT 1$$/#define SF3_SUPPORT 0/' $(FLUIDLITE_DIR)/src/fluid_config.h
+	touch $(FLUIDLITE_STAMP)
+	rm -f $(FLUIDLITE_ARCHIVE).tmp
 
 ifeq ($(platform), sf2000)
     TARGET := $(NAME)_libretro_$(platform).a
@@ -13,6 +49,11 @@ ifeq ($(platform), sf2000)
     override CFLAGS += $(MIPS_FLAGS)
     override CXXFLAGS += $(MIPS_FLAGS) -fno-use-cxa-atexit -fno-exceptions -fno-rtti
     STATIC_LINKING = 1
+else ifeq ($(platform), sf3000)
+    TARGET := $(NAME)_libretro.so
+    MIPS_FLAGS = -EL -mips32r2 -march=mips32r2 -mtune=74kc -mdspr2 -mfp32 -mhard-float -mlong-calls -fPIC -ffunction-sections -fdata-sections -DSF3000 -DFROGGY_SD_ROOT=\"/mnt/sdcard\"
+    override CFLAGS += $(MIPS_FLAGS)
+    override CXXFLAGS += $(MIPS_FLAGS) -fno-use-cxa-atexit -fno-exceptions -fno-rtti
 else
     TARGET = $(NAME)_libretro.so
     CC = gcc
@@ -28,6 +69,8 @@ all: $(TARGET)
 MORE_CFLAGS = -O3 -fomit-frame-pointer -finline-functions -fno-strict-aliasing -DUSE_PRECOMPILED_HEADER=1 \
 	-I. \
 	-Ipspkvm/platform_gb300 \
+	-I$(FLUIDLITE_DIR)/include \
+	-I$(FLUIDLITE_DIR)/src \
 	-Ilibretro/core \
 	-Ipspkvm/javacall/interface \
 	-Ipspkvm/javacall/interface/common \
@@ -124,6 +167,7 @@ MORE_CFLAGS = -O3 -fomit-frame-pointer -finline-functions -fno-strict-aliasing -
 OBJS = \
 	pspkvm/platform_gb300/video.o \
 	pspkvm/platform_gb300/audio.o \
+	$(FLUIDLITE_OBJS) \
 	pspkvm/platform_gb300/input.o \
 	pspkvm/platform_gb300/filesystem.o \
 	pspkvm/platform_gb300/timer.o \
@@ -363,7 +407,9 @@ OBJS = \
 	pspkvm/cldc/src/vm/share/float/Cosine_kernel.o \
 	pspkvm/cldc/src/vm/share/float/Tangent_kernel.o
 
-$(TARGET): $(OBJS)
+$(FLUIDLITE_OBJS): $(FLUIDLITE_STAMP)
+
+$(TARGET): $(OBJS) $(FLUIDLITE_OBJS)
 ifeq ($(STATIC_LINKING), 1)
 	$(AR) rcs $@ $(OBJS)
 else
@@ -381,5 +427,8 @@ override CXXFLAGS += $(MORE_CFLAGS)
 
 %.o: %.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(FLUIDLITE_OBJS): $(FLUIDLITE_STAMP)
+$(OBJS): $(FLUIDLITE_STAMP)
 
 .PHONY: all clean
