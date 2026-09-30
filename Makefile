@@ -13,6 +13,11 @@ ifeq ($(platform), sf2000)
     override CFLAGS += $(MIPS_FLAGS)
     override CXXFLAGS += $(MIPS_FLAGS) -fno-use-cxa-atexit -fno-exceptions -fno-rtti
     STATIC_LINKING = 1
+else ifeq ($(platform), sf3000)
+    TARGET := $(NAME)_libretro.so
+    MIPS_FLAGS = -EL -mips32r2 -march=mips32r2 -mtune=74kc -mdspr2 -mfp32 -mhard-float -mlong-calls -fPIC -ffunction-sections -fdata-sections -DSF3000 -DFROGGY_SD_ROOT=\"/mnt/sdcard\"
+    override CFLAGS += $(MIPS_FLAGS)
+    override CXXFLAGS += $(MIPS_FLAGS) -fno-use-cxa-atexit -fno-exceptions -fno-rtti
 else
     TARGET = $(NAME)_libretro.so
     CC = gcc

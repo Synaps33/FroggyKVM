@@ -34,8 +34,8 @@ char* midpRemoveCommandOption(const char* opt, char** argv, int* argc) {
 }
 char* midpFixMidpHome(const char* prog) {
     (void)prog;
-    xlog("[GB300-STUB] midpFixMidpHome returning '/mnt/sda1/ROMS/J2ME'\n");
-    return "/mnt/sda1/ROMS/J2ME";
+    xlog("[GB300-STUB] midpFixMidpHome returning J2ME ROM directory\n");
+    return FROGGY_SD_ROOT "/roms/j2me";
 }
 
 void midpMIDletProxyListReset(void) {
@@ -44,7 +44,7 @@ void midpMIDletProxyListReset(void) {
 
 const char* midp_suite_get_suite_storage(int id) {
     (void)id;
-    return "/mnt/sda1/SAVES/J2ME";
+    return FROGGY_SD_ROOT "/saves/j2me";
 }
 const char* midp_suite_get_class_path(int id) { (void)id; return NULL; }
 char storageGetPathSeparator(void) { return ':'; }
@@ -286,7 +286,7 @@ KNIDECL(com_sun_midp_util_ResourceHandler_loadRomizedResource0) {
             name[len] = '\0';
 
             static const char *dirs[] = {
-                "/mnt/sda1/system/skin/",
+                FROGGY_SD_ROOT "/cubegm/skin/",
                 "/tmp/",
                 NULL
             };

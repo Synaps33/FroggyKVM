@@ -58,10 +58,33 @@ static retro_input_poll_t input_poll_cb = NULL;
 static retro_input_state_t input_state_cb = NULL;
 static retro_environment_t environ_cb = NULL;
 
+static void request_libretro_shutdown(void) {
+    if (environ_cb)
+        environ_cb(RETRO_ENVIRONMENT_SHUTDOWN, NULL);
+}
+
 static bool game_loaded = false;
 static bool jvm_started = false;
 
-#if defined(SF2000) || defined(__mips__)
+static bool j2me_classes_available(void) {
+    static const char *paths[] = {
+        FROGGY_SD_ROOT "/cubegm/bios/classes.zip",
+        FROGGY_SD_ROOT "/BIOS/classes.zip",
+        FROGGY_SD_ROOT "/cubegm/cores/j2me/classes.zip",
+        FROGGY_SD_ROOT "/roms/j2me/classes.zip",
+        NULL
+    };
+    for (int i = 0; paths[i]; i++) {
+        FILE *f = fopen(paths[i], "rb");
+        if (f) {
+            fclose(f);
+            return true;
+        }
+    }
+    return false;
+}
+
+#if defined(SF2000) || defined(GB300)
 extern volatile uint32_t g_joy_task_state;
 extern volatile uint32_t g_joy_state;
 extern void frontend_check_hotkeys(void);
@@ -197,14 +220,18 @@ RETRO_API void retro_get_system_av_info(struct retro_system_av_info *info) {
 }
 
 RETRO_API bool retro_load_game(const struct retro_game_info *game) {
+    if (!j2me_classes_available()) {
+        xlog("[PSPKVM-GB300] Missing classes.zip; install it in /cubegm/bios/classes.zip\n");
+        return false;
+    }
     if (game && game->path) {
         xlog("[PSPKVM-GB300] retro_load_game: Loading ROM file '%s'\n", game->path);
         gb300_fs_set_rom(game->path);
         gb300_input_load_config(game->path);
     } else {
         xlog("[PSPKVM-GB300] retro_load_game: Running in standalone/stub mode\n");
-        gb300_fs_set_rom("/mnt/sda1/ROMS/J2ME/stub.jar");
-        gb300_input_load_config("/mnt/sda1/ROMS/J2ME/stub.jar");
+        gb300_fs_set_rom(FROGGY_SD_ROOT "/roms/j2me/stub.jar");
+        gb300_input_load_config(FROGGY_SD_ROOT "/roms/j2me/stub.jar");
     }
     game_loaded = true;
     jvm_started = false;
@@ -240,7 +267,7 @@ void gb300_poll_events(void) {
         last_input_time = now;
         
         if (input_poll_cb) input_poll_cb();
-#if defined(SF2000) || defined(__mips__)
+#if defined(SF2000) || defined(GB300)
         frontend_check_hotkeys();
 #endif
         uint32_t buttons = poll_gb300_buttons();
@@ -372,6 +399,7 @@ RETRO_API void retro_run(void) {
 
         if (s_exit_requested) {
             dly_tsk(16);
+            request_libretro_shutdown();
             return;
         }
 
@@ -379,6 +407,7 @@ RETRO_API void retro_run(void) {
         gb300_hacker_exit(0);
         s_exit_requested = 1;
         dly_tsk(16);
+        request_libretro_shutdown();
         return;
     }
 

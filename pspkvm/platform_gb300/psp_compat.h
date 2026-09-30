@@ -8,6 +8,10 @@
 #include <time.h>
 #include <sys/time.h>
 
+#ifndef FROGGY_SD_ROOT
+#define FROGGY_SD_ROOT "/mnt/sda1"
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
