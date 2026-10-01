@@ -6,18 +6,18 @@
 #include "dirent.h"
 #include "psp_compat.h"
 
-#define J2ME_ROM_DIR  "/mnt/sda1/ROMS/J2ME"
-#define J2ME_SAVE_DIR "/mnt/sda1/SAVES/J2ME"
+#define J2ME_ROM_DIR  FROGGY_SD_ROOT "/roms/j2me"
+#define J2ME_SAVE_DIR FROGGY_SD_ROOT "/saves/j2me"
 
 static char current_rom_path[512] = {0};
 static char current_jar_path[512] = {0};
 
 void gb300_fs_init(void) {
 #if defined(_WIN32)
-    mkdir("/mnt/sda1/SAVES");
+    mkdir(FROGGY_SD_ROOT "/saves");
     mkdir(J2ME_SAVE_DIR);
 #else
-    mkdir("/mnt/sda1/SAVES", 0777);
+    mkdir(FROGGY_SD_ROOT "/saves", 0777);
     mkdir(J2ME_SAVE_DIR, 0777);
 #endif
 }
