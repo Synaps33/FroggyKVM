@@ -2168,7 +2168,21 @@ static const JvmNativeFunction javax_microedition_m3g_World_natives[] = {
   {(char*)0, (char*)0, (void*)0}
 };
 
+extern "C" jint Java_com_mascotcapsule_micro3d_v3_Rasterizer_nInit(void);
+extern "C" void Java_com_mascotcapsule_micro3d_v3_Rasterizer_nFillAffineTReplaceFast(void);
+
+static const JvmNativeFunction com_mascotcapsule_micro3d_v3_Rasterizer_natives[] = {
+  JVM_NATIVE("nInit", "()I",
+             Java_com_mascotcapsule_micro3d_v3_Rasterizer_nInit),
+  JVM_NATIVE("nFillAffineTReplaceFast",
+             "([IIIIIIIIIIII[BI[IIIIII)V",
+             Java_com_mascotcapsule_micro3d_v3_Rasterizer_nFillAffineTReplaceFast),
+  {(char*)0, (char*)0, (void*)0}
+};
+
 const JvmNativesTable jvm_natives_table[] = {
+  JVM_TABLE("com/mascotcapsule/micro3d/v3/Rasterizer",
+            com_mascotcapsule_micro3d_v3_Rasterizer_natives, (JvmNativeFunction*)0),
   JVM_TABLE("com/nokia/mid/ui/DirectGraphicsImpl",
                                         com_nokia_mid_ui_DirectGraphicsImpl_natives,
                                         (JvmNativeFunction*)0),

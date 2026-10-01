@@ -256,7 +256,7 @@ extern "C" {
     tty->print_cr("UNIMPLEMENTED BYTECODE: %s\n", #x);          \
     BREAKPOINT;
 
-#if defined(MIPS) && USE_MIPS_ASM_OPTIMIZED_INTERPRETER
+#if defined(__mips__) && USE_MIPS_ASM_OPTIMIZED_INTERPRETER
 
 #define REG_JPC "s6"
 #define REG_JSP "s7"
@@ -1884,6 +1884,12 @@ enum {
 
   FUNC_UNIMPLEMENTED(interpreter_throw_NullPointerException_tos_cached)
 
+  // Note: interpreter_call_vm() below passes T_VOID, but shared_call_vm_internal
+  // checks CURRENT_HAS_PENDING_EXCEPTION after running the callback and, if
+  // set, redispatches the exception with T_ILLEGAL so that
+  // find_exception_frame() honours this frame's exception table. Do NOT add an
+  // extra dispatch here: the frame has already been rewired by that point and
+  // a second dispatch would rewind the program counter by one instruction.
   void interpreter_throw_NullPointerException() {
     interpreter_call_vm((address)&null_pointer_exception, T_VOID);
   }
@@ -2520,7 +2526,7 @@ enum {
   }
 
   
-#if !defined(MIPS) || !(USE_MIPS_ASM_OPTIMIZED_INTERPRETER)
+#if !defined(__mips__) || !(USE_MIPS_ASM_OPTIMIZED_INTERPRETER)
 
 
   /* bytecodes implementation follows */

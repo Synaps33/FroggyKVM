@@ -10,6 +10,37 @@ public class Rasterizer {
 	static final int fp = 12, FP = 1 << fp;
 	private static final int shadeFpShift = fp - 8;
 
+	/* ---- GB300: native fast path ------------------------------------
+	 *
+	 * The Java fill routines below are executed by the C bytecode
+	 * interpreter, which costs roughly 100 bytecodes per pixel and limits us
+	 * to a couple of frames per second on GB300. The same inner loop written
+	 * in C measures about 60x faster.
+	 *
+	 * UseNative is probed once at class-initialisation time. When the native
+	 * methods are missing (or anything goes wrong) it stays false and the
+	 * pure Java implementation below is used instead, so behaviour degrades to
+	 * "slow" rather than "broken".
+	 */
+	private static native int nInit();
+	private static native void nFillAffineTReplaceFast(
+			int[] frameBuffer, int fbWidth,
+			int clipX1, int clipX2,
+			int y_start, int y_end,
+			int u_start, int du_start, int du, int v_start, int dv_start, int dv,
+			byte[] texBitmap, int texWBit, int[] texPal, int texLenMask,
+			int x_start, int dx_start, int x_end, int dx_end);
+
+	private static final boolean UseNative = probeNative();
+
+	private static boolean probeNative() {
+		try {
+			return nInit() == 1;
+		} catch(Throwable t) {
+			return false;
+		}
+	}
+
 	private Rasterizer() {
 	}
 
@@ -252,13 +283,25 @@ public class Rasterizer {
 				switch(blendMode) {
 					default:
 						if(fastPath) {
-							fillTriangleAffineT_replaceFast(
-									frameBuffer, fbWidth,
-									clipX1, clipX2,
-									y_start, y_end_draw,
-									u, du_left, du, v, dv_left, dv,
-									tex,
-									x1, dx_left, x2, dx_right);
+							/* GB300: native fast path, identical arithmetic. */
+							if(UseNative) {
+								nFillAffineTReplaceFast(
+										frameBuffer, fbWidth,
+										clipX1, clipX2,
+										y_start, y_end_draw,
+										u, du_left, du, v, dv_left, dv,
+										tex.bitmapData, tex.widthBit, tex.origPalette,
+										tex.bitmapData.length - 1,
+										x1, dx_left, x2, dx_right);
+							} else {
+								fillTriangleAffineT_replaceFast(
+										frameBuffer, fbWidth,
+										clipX1, clipX2,
+										y_start, y_end_draw,
+										u, du_left, du, v, dv_left, dv,
+										tex,
+										x1, dx_left, x2, dx_right);
+							}
 							break;
 						} else {
 							fillTriangleAffineT_replace(

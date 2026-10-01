@@ -2,8 +2,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <math.h>
 #include "psp_compat.h"
 #include <kni.h>
+#include "fluidlite.h"
 
 #define AUDIO_SAMPLE_RATE 22050
 #define AUDIO_BUFFER_SIZE 4096
@@ -91,6 +93,69 @@ void gb300_audio_stop_tone(void) {
 #define WAV_MAX_RAW_TOTAL (8 * 1024 * 1024)
 #define WAV_MAX_PCM_TOTAL (12 * 1024 * 1024)
 
+/* ---- FluidLite soundfont synth -------------------------------------
+ *
+ * GB300: the built-in square-wave synth below sounds nothing like a real
+ * instrument. FluidLite is FluidSynth's embeddable core, so we keep our own
+ * SMF parser and mixer and only replace the oscillator bank: MIDI events go
+ * straight to the soundfont, and fluid_synth_write_s16() fills the same
+ * int16 buffer the rest of the mixer already expects.
+ *
+ * One synth is shared by every player - loading a 3 MB soundfont per track
+ * would blow the memory budget. If the soundfont cannot be loaded we fall
+ * back to the original synth so games still make noise.
+ */
+static fluid_settings_t *g_fl_settings = NULL;
+static fluid_synth_t     *g_fl_synth = NULL;
+static int                g_fl_probed = 0;
+
+static const char *g_fl_soundfonts[] = {
+    "/mnt/sda1/bios/Roland_SC-55.sf2",
+    "/mnt/sda1/system/Roland_SC-55.sf2",
+    "/home/Sajnaps/gb300/bios/Roland_SC-55.sf2",
+    "/home/Sajnaps/gb300/froggykvm/Roland_SC-55.sf2",
+    NULL
+};
+
+static fluid_synth_t *midi_fluid_synth(void) {
+    int i;
+    if (g_fl_probed) return g_fl_synth;
+    g_fl_probed = 1;
+
+    g_fl_settings = new_fluid_settings();
+    if (!g_fl_settings) return NULL;
+    /* 22050 Hz, mono source rendered to our stereo frame buffer. */
+    fluid_settings_setnum(g_fl_settings, "synth.sample-rate", (double)WAV_PCM_RATE);
+    g_fl_synth = new_fluid_synth(g_fl_settings);
+    if (!g_fl_synth) return NULL;
+
+    for (i = 0; g_fl_soundfonts[i]; i++) {
+        if (fluid_synth_sfload(g_fl_synth, g_fl_soundfonts[i], 1) >= 0) {
+            xlog("[AUDIO] FluidLite: soundfont %s wczytany\n", g_fl_soundfonts[i]);
+            return g_fl_synth;
+        }
+    }
+    xlog("[AUDIO] FluidLite: brak soundfontu, uzywam wlasnego syntezatora\n");
+    delete_fluid_synth(g_fl_synth);  g_fl_synth = NULL;
+    delete_fluid_settings(g_fl_settings); g_fl_settings = NULL;
+    return NULL;
+}
+
+/* Max frames synthesised per mixer call, so no single call stalls
+ * the emulator for long. 2048 frames is ~93 ms of audio. */
+#define MIDI_TOPUP_MAX 2048
+
+/* Synthesis budget shared by every player for one gb300_audio_read() call.
+ *
+ * Doom RPG opens 22 MIDI tracks. With a per-player cap the mixer synthesised
+ * 22 * cap frames on every output frame, which froze the device instantly
+ * (it only looked OK on a desktop). One budget for the whole call makes the
+ * worst case independent of how many tracks a game starts. */
+#define MIDI_BUDGET_PER_READ 4096
+static int g_midi_budget = 0;
+
+typedef struct midi_stream_s midi_stream_t;
+
 typedef struct {
     int used;
     char mime[32];
@@ -106,7 +171,11 @@ typedef struct {
     int volume;              /* 0..100 */
     int muted;
     int durationMs;
+    void *midi;              /* midi_stream_t while streaming a SMF track */
+    int loopMidi;            /* loop the rendered prefix instead of stopping */
 } wav_player_t;
+
+static void midi_stream_free(midi_stream_t *ms);
 
 static wav_player_t g_wav[WAV_MAX_PLAYERS];
 static int g_wav_raw_total = 0;
@@ -118,6 +187,8 @@ static wav_player_t *wav_get(int handle) {
 }
 
 static void wav_unload(wav_player_t *p) {
+    if (p->midi) { midi_stream_free((midi_stream_t *)p->midi); p->midi = NULL; }
+    p->loopMidi = 0;
     if (p->raw) { g_wav_raw_total -= p->rawLen; free(p->raw); p->raw = NULL; }
     if (p->pcm) { g_wav_pcm_total -= p->pcmFrames * p->channels * 2; free(p->pcm); p->pcm = NULL; }
     p->channels = 2;
@@ -399,6 +470,311 @@ static void midi_synth(midi_voice_t *voices, int16_t *out, int frames) {
 }
 
 /* Render an SMF to 22050 Hz mono PCM. Returns 1 on success. */
+/* ---- Streaming SMF synthesis ----------------------------------------
+ *
+ * GB300 fix: midi_render() used to synthesise the whole track in one go from
+ * nBuffering(), i.e. while the MIDlet thread is inside
+ * Manager.createPlayer(...,"audio/midi"). A 124 s track meant 2.7 M frames of
+ * soft-float synthesis blocking the game thread - Galaxy on Fire 2 never got
+ * past its loading screen because of it.
+ *
+ * Parsing the SMF is cheap, so we do that up front and keep the event list.
+ * The actual synthesis now happens in small chunks from the mixer
+ * (midi_stream_render via wav_mix_frame), so the game thread is never blocked
+ * and audio is produced in real time while it plays.
+ */
+struct midi_stream_s {
+    midi_event_t *ev;
+    int nev;
+    int evcap;
+    int ev_i;                /* next event to process */
+    int division;            /* PPQN */
+    int64_t curTick;
+    int64_t tempo;           /* microseconds per quarter note */
+    int totalTicks;
+    midi_voice_t voices[MIDI_MAX_VOICES];
+    int chanProg[16], chanVol[16], chanExpr[16];
+    int order;
+    int done;                /* all events consumed */
+    int looped;              /* one loop of the track has been rendered */
+};
+static void midi_stream_free(midi_stream_t *ms) {
+    if (!ms) return;
+    if (ms->ev) free(ms->ev);
+    free(ms);
+}
+
+static int midi_stream_render(wav_player_t *p, int frames);
+
+/* Parse the SMF in p->raw into a new stream. Returns 1 on success. */
+static int midi_stream_open(wav_player_t *p) {
+    unsigned char *d = p->raw;
+    int n = p->rawLen;
+    int hlen, ntrks, division, pos, i, j;
+    int nev = 0, evcap = 4096;
+    midi_event_t *ev;
+    midi_stream_t *ms;
+    int64_t maxTick = 0;
+
+    if (!d || n < 14 || memcmp(d, "MThd", 4) != 0) return 0;
+    hlen = (d[4] << 24) | (d[5] << 16) | (d[6] << 8) | d[7];
+    if (hlen < 6 || 8 + hlen > n) return 0;
+    ntrks = (d[10] << 8) | d[11];
+    division = (d[12] << 8) | d[13];
+    if (division <= 0 || (division & 0x8000)) return 0;   /* PPQN only */
+
+    ev = (midi_event_t *)malloc(sizeof(midi_event_t) * evcap);
+    if (!ev) return 0;
+
+    pos = 8 + hlen;
+    for (i = 0; i < ntrks && pos + 8 <= n; i++) {
+        int tlen, tend, tick = 0, running = 0;
+        if (memcmp(d + pos, "MTrk", 4) != 0) break;
+        tlen = (d[pos + 4] << 24) | (d[pos + 5] << 16) | (d[pos + 6] << 8) | d[pos + 7];
+        pos += 8;
+        tend = pos + tlen;
+        if (tend > n) tend = n;
+        while (pos < tend) {
+            int delta = midi_vlq(d, &pos, tend);
+            int status;
+            tick += delta;
+            if (pos >= tend) break;
+            status = d[pos];
+            if (status & 0x80) { pos++; running = status; } else { status = running; }
+            if (status == 0xFF) {
+                int mtype, mlen;
+                if (pos >= tend) break;
+                mtype = d[pos++];
+                mlen = midi_vlq(d, &pos, tend);
+                if (mtype == 0x51 && mlen == 3 && pos + 3 <= tend) {
+                    int tempoVal = (d[pos] << 16) | (d[pos + 1] << 8) | d[pos + 2];
+                    midi_add_event(&ev, &nev, &evcap, tick, 0xFF, 0, 0x51, 0, tempoVal);
+                }
+                pos += mlen;
+            } else if (status == 0xF0 || status == 0xF7) {
+                int slen = midi_vlq(d, &pos, tend);
+                pos += slen;
+            } else {
+                int type = status & 0xF0;
+                int ch = status & 0x0F;
+                if (type == 0xC0 || type == 0xD0) {
+                    int d1 = (pos < tend) ? d[pos++] : 0;
+                    if (type == 0xC0) {
+                        midi_add_event(&ev, &nev, &evcap, tick, 0xC0, ch, d1, 0, 0);
+                    }
+                } else {
+                    int d1 = (pos < tend) ? d[pos++] : 0;
+                    int d2 = (pos < tend) ? d[pos++] : 0;
+                    if (type == 0x90 && d2 > 0) {
+                        midi_add_event(&ev, &nev, &evcap, tick, 0x90, ch, d1, d2, 0);
+                    } else if (type == 0x80 || (type == 0x90 && d2 == 0)) {
+                        midi_add_event(&ev, &nev, &evcap, tick, 0x80, ch, d1, 0, 0);
+                    } else if (type == 0xB0) {
+                        midi_add_event(&ev, &nev, &evcap, tick, 0xB0, ch, d1, d2, 0);
+                    }
+                }
+            }
+        }
+        pos = tend;
+    }
+
+    if (nev <= 0) { free(ev); return 0; }
+    qsort(ev, nev, sizeof(midi_event_t), midi_cmp);
+
+    for (i = 0; i < nev; i++) {
+        if (ev[i].tick > maxTick) maxTick = ev[i].tick;
+    }
+
+    ms = (midi_stream_t *)calloc(1, sizeof(midi_stream_t));
+    if (!ms) { free(ev); return 0; }
+    ms->ev = ev;
+    ms->nev = nev;
+    ms->evcap = evcap;
+    ms->ev_i = 0;
+    ms->division = division;
+    ms->curTick = 0;
+    ms->tempo = 500000;
+    ms->totalTicks = (int)maxTick;
+    midi_init_waves();
+    for (j = 0; j < MIDI_MAX_VOICES; j++) memset(&ms->voices[j], 0, sizeof(midi_voice_t));
+    for (j = 0; j < 16; j++) { ms->chanProg[j] = 0; ms->chanVol[j] = 100; ms->chanExpr[j] = 127; }
+
+    if (p->midi) midi_stream_free((midi_stream_t *)p->midi);
+    p->midi = ms;
+    p->channels = 1;
+
+    /* GB300: make sure the soundfont synth is up before we start a track. */
+    midi_fluid_synth();
+
+    /* GB300: render a bounded prefix once, at load time.
+     *
+     * Synthesising the whole track here blocked the MIDlet thread for
+     * minutes (a 64 s track is 1.4 M frames of soft-float synthesis), and
+     * synthesising on demand from the mixer instead made the CPU cost
+     * continuous, which hung games in their menu on GB300. A short prefix
+     * keeps the one-off load cost small and leaves the mixer free: the
+     * prefix simply loops, and DirectPlayer restarts the player on stop. */
+    {
+        int64_t totalFrames = (((int64_t)ms->totalTicks * ms->tempo) /
+                               (1000000LL * ms->division)) * WAV_PCM_RATE;
+        int prefix = WAV_PCM_RATE * 10;
+        if (prefix > WAV_MAX_PCM_TOTAL / 2) prefix = WAV_MAX_PCM_TOTAL / 2;
+        if (totalFrames > 0 && prefix > (int)totalFrames) prefix = (int)totalFrames;
+        if (prefix > 0) {
+            /* Only a small head start here. Rendering the whole 10 s prefix
+             * in one call blocked the MIDlet thread for the full synthesis
+             * (Asphalt froze to 0 FPS when its music started, Doom stuttered
+             * on every new track). The mixer tops the buffer up incrementally
+             * instead, so no single call is expensive. */
+            int head = WAV_PCM_RATE / 4;      /* 250 ms */
+            if (prefix > head) prefix = head;
+            midi_stream_render(p, prefix);
+            p->loopMidi = (totalFrames > 0 && (int64_t)ms->totalTicks * ms->tempo /
+                           (1000000LL * ms->division) * WAV_PCM_RATE > p->pcmFrames);
+            xlog("[AUDIO] MIDI head: %d klatek (bufor uzupelniany na biezaco)\n",
+                 p->pcmFrames);
+        }
+    }
+
+    /* Duration of the track, so Player.getDuration() still works.
+     * seconds = ticks * tempo / (1e6 * PPQN), milliseconds = seconds * 1000. */
+    p->durationMs = (int)(((int64_t)maxTick * ms->tempo) / (1000000LL * division) * 1000);
+    {
+        int64_t totalFrames = (((int64_t)maxTick * ms->tempo) / (1000000LL * division)) * WAV_PCM_RATE;
+        xlog("[AUDIO] MIDI opened: %d events, %d ticks (~%d ms, %d frames), streaming\n",
+             nev, (int)maxTick, p->durationMs, (int)totalFrames);
+    }
+    return 1;
+}
+
+/* Synthesise the next `frames` frames of the stream into p->pcm. */
+static int midi_stream_render(wav_player_t *p, int frames) {
+    midi_stream_t *ms = (midi_stream_t *)p->midi;
+    int budget, outPos, i, j, want;
+
+    if (!ms || frames <= 0) return 0;
+
+    budget = WAV_MAX_PCM_TOTAL - g_wav_pcm_total + p->pcmFrames * p->channels * 2;
+    want = p->pcmFrames + frames;
+    if (want * 2 > budget) want = budget / 2;
+    if (want <= p->pcmFrames) return 0;                    /* out of PCM budget */
+    if (want > WAV_PCM_RATE * 300) want = WAV_PCM_RATE * 300;   /* 5 min cap */
+
+    {
+        int16_t *np = (int16_t *)realloc(p->pcm, (size_t)want * 2);
+        if (!np) return 0;
+        p->pcm = np;
+    }
+    memset(p->pcm + p->pcmFrames, 0, (size_t)(want - p->pcmFrames) * 2);
+    outPos = p->pcmFrames;
+    p->pcmFrames = want;
+    g_wav_pcm_total += (want - outPos) * 2;
+
+    while (ms->ev_i < ms->nev && outPos < p->pcmFrames) {
+        midi_event_t *e = &ms->ev[ms->ev_i];
+        int64_t target = outPos + (int64_t)(e->tick - ms->curTick) * ms->tempo * WAV_PCM_RATE /
+                                   (1000000LL * ms->division);
+        if (target > p->pcmFrames) target = p->pcmFrames;
+        if (target > outPos) {
+            int n = (int)(target - outPos);
+            if (g_fl_synth) {
+                /* FluidLite renders straight into our int16 frame buffer. */
+                fluid_synth_write_s16(g_fl_synth, n,
+                                      p->pcm + outPos, 0, p->channels,
+                                      p->pcm + outPos, 0, p->channels);
+            } else {
+                midi_synth(ms->voices, p->pcm + outPos, n);
+            }
+            outPos = (int)target;
+        }
+        ms->curTick = e->tick;
+        ms->ev_i++;
+
+        if (e->type == 0xFF) {
+            if (e->d1 == 0x51 && e->value > 0) ms->tempo = e->value;
+        } else if (e->type == 0x90) {
+            int ch = e->ch, note = e->d1 & 0x7F, vel = e->d2 & 0x7F;
+            if (g_fl_synth) {
+                /* channel 9 is the drum kit in General MIDI */
+                fluid_synth_noteon(g_fl_synth, ch, note, vel);
+                ms->curTick = e->tick;
+                ms->ev_i++;
+                continue;
+            }
+            midi_voice_t *v = NULL;
+            for (j = 0; j < MIDI_MAX_VOICES; j++) {
+                if (ms->voices[j].active && ms->voices[j].ch == ch && ms->voices[j].note == note) { v = &ms->voices[j]; break; }
+            }
+            if (!v) for (j = 0; j < MIDI_MAX_VOICES; j++) {
+                if (!ms->voices[j].active) { v = &ms->voices[j]; break; }
+            }
+            if (!v) {
+                int best = 0;
+                for (j = 1; j < MIDI_MAX_VOICES; j++) {
+                    if (ms->voices[j].order < ms->voices[best].order) best = j;
+                }
+                v = &ms->voices[best];
+            }
+            v->gain = (vel * ms->chanVol[ch] * ms->chanExpr[ch]) / (127 * 127);
+            if (v->gain > 127) v->gain = 127;
+            if (v->gain < 0) v->gain = 0;
+            v->note = note;
+            v->ch = ch;
+            v->prog = ms->chanProg[ch];
+            v->wave = (ch == 9) ? 2 : midi_prog_wave(ms->chanProg[ch]);
+            v->phase = 0;
+            v->inc = midi_note_phase_step[note];
+            v->env = 0;
+            v->release = 0;
+            v->active = 1;
+            v->order = ms->order++;
+        } else if (e->type == 0x80) {
+            int ch = e->ch, note = e->d1 & 0x7F;
+            if (g_fl_synth) {
+                fluid_synth_noteoff(g_fl_synth, ch, note);
+                ms->curTick = e->tick;
+                ms->ev_i++;
+                continue;
+            }
+            for (j = 0; j < MIDI_MAX_VOICES; j++) {
+                if (ms->voices[j].active && ms->voices[j].ch == ch && ms->voices[j].note == note) {
+                    ms->voices[j].release = 1;
+                }
+            }
+        } else if (e->type == 0xC0) {
+            ms->chanProg[e->ch & 0x0F] = e->d1 & 0x7F;
+            if (g_fl_synth) {
+                fluid_synth_program_change(g_fl_synth, e->ch & 0x0F, e->d1 & 0x7F);
+            }
+        } else if (e->type == 0xB0) {
+            int cc = e->d1 & 0x7F, val = e->d2 & 0x7F;
+            if (cc == 7) ms->chanVol[e->ch & 0x0F] = val;
+            else if (cc == 11) ms->chanExpr[e->ch & 0x0F] = val;
+            if (g_fl_synth) {
+                fluid_synth_cc(g_fl_synth, e->ch & 0x0F, cc, val);
+            }
+        }
+    }
+    if (ms->ev_i >= ms->nev) ms->done = 1;
+    return 1;
+}
+
+/* Restart a finished stream so looping players can play again. */
+static void midi_stream_rewind(wav_player_t *p) {
+    midi_stream_t *ms = (midi_stream_t *)p->midi;
+    int j;
+    if (!ms) return;
+    ms->ev_i = 0;
+    ms->curTick = 0;
+    ms->tempo = 500000;
+    ms->order = 0;
+    ms->done = 0;
+    for (j = 0; j < MIDI_MAX_VOICES; j++) memset(&ms->voices[j], 0, sizeof(midi_voice_t));
+    for (j = 0; j < 16; j++) { ms->chanProg[j] = 0; ms->chanVol[j] = 100; ms->chanExpr[j] = 127; }
+    p->pcmFrames = 0;
+    p->pos = 0;
+}
+
 static int midi_render(wav_player_t *p) {
     unsigned char *d = p->raw;
     int n = p->rawLen;
@@ -660,13 +1036,74 @@ static void wav_mix_frame(int32_t *l, int32_t *r) {
     int i;
     for (i = 0; i < WAV_MAX_PLAYERS; i++) {
         wav_player_t *p = &g_wav[i];
-        if (p->used && p->playing && !p->paused && p->pcm && p->pos < p->pcmFrames) {
+        if (!p->used || !p->playing || p->paused) continue;
+
+        if (p->midi) {
+            /* Top the buffer up a little at a time.
+             *
+             * Two earlier mistakes are worth recording: rendering the whole
+             * 10 s prefix inside createPlayer froze Asphalt (0 FPS once the
+             * music started) and stuttered Doom on every new track, while
+             * adding a full extra second on every output frame was
+             * quadratic and saturated the CPU. So: keep ~1 s of audio ahead of
+             * the play head, but never render more than the actual deficit
+             * and never more than MIDI_TOPUP_MAX per call. */
+            if (!p->pcm) continue;
+            {
+                midi_stream_t *ms = (midi_stream_t *)p->midi;
+                int remaining = p->pcmFrames - p->pos;
+
+                /* The track ran out of events and we already buffered all of
+                 * it: stop here instead of appending silence forever, which
+                 * is what made long tracks fade out early. */
+                if (ms && ms->done && remaining > 0 && remaining < WAV_PCM_RATE / 4) {
+                    if (p->loopMidi) {
+                        /* Rewind and synthesise the next lap lazily. */
+                        ms->ev_i = 0;
+                        ms->curTick = 0;
+                        ms->done = 0;
+                        ms->looped = 0;
+                        p->pcmFrames = 0;
+                        p->pos = 0;
+                        remaining = 0;
+                    }
+                }
+
+                /* Only synthesise while there are events left. */
+                if (ms && !ms->done && g_midi_budget > 0) {
+                    if (remaining < WAV_PCM_RATE * 2) {
+                        int deficit = WAV_PCM_RATE * 2 - remaining;
+                        int chunk = (deficit > MIDI_TOPUP_MAX) ? MIDI_TOPUP_MAX : deficit;
+                        if (chunk > g_midi_budget) chunk = g_midi_budget;
+                        if (midi_stream_render(p, chunk)) {
+                            g_midi_budget -= chunk;
+                        }
+                    }
+                }
+            }
+            if (p->pos >= p->pcmFrames) {
+                if (p->loopMidi) {
+                    p->pos = 0;              /* seamless loop */
+                } else {
+                    p->playing = 0;
+                    p->pos = 0;
+                    continue;
+                }
+            }
+        } else if (!p->pcm) {
+            continue;;
+        }
+
+        if (p->pos < p->pcmFrames) {
             int vol = p->muted ? 0 : p->volume;
             int sl = p->pcm[p->pos * p->channels];
             int sr = (p->channels > 1) ? p->pcm[p->pos * p->channels + 1] : sl;
             *l += (sl * vol) / 100;
             *r += (sr * vol) / 100;
-            if (++p->pos >= p->pcmFrames) {
+            p->pos++;
+            if (!p->midi && p->pos >= p->pcmFrames) {
+                /* Decoded WAV: stop at the end, as before. Streaming MIDI loops
+                 * instead, because its end is only reached while playing. */
                 p->playing = 0;
                 p->pos = 0;
             }
@@ -685,6 +1122,8 @@ int gb300_audio_write(const int16_t *samples, int num_frames) {
 
 int gb300_audio_read(int16_t *dst, int num_frames) {
     if (!dst || num_frames <= 0) return 0;
+
+    g_midi_budget = MIDI_BUDGET_PER_READ;
 
     for (int i = 0; i < num_frames; i++) {
         int32_t mix_l = 0;
@@ -852,8 +1291,10 @@ Java_com_sun_mmedia_DirectPlayer_nBuffering(void) {
         /* end of stream: decode and drop the raw data */
         if (p->raw && !p->pcm) {
             if (p->rawLen >= 4 && memcmp(p->raw, "MThd", 4) == 0) {
-                if (!midi_render(p)) {
-                    xlog("[AUDIO] handle %d: MIDI render failed (%d bytes)\n", handle, p->rawLen);
+                /* Only parse here; the samples are synthesised on demand by
+                 * wav_mix_frame so that createPlayer() returns immediately. */
+                if (!midi_stream_open(p)) {
+                    xlog("[AUDIO] handle %d: MIDI parse failed (%d bytes)\n", handle, p->rawLen);
                 }
             } else if (!wav_decode(p)) {
                 xlog("[AUDIO] handle %d: unsupported audio (%d bytes, truncated=%d, mime='%s')\n",

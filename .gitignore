@@ -33,3 +33,12 @@ Thumbs.db
 msys64/
 
 
+
+# Soundfonts (third-party, large - supply separately)
+*.sf2
+
+# Game ROMs / MIDlet jars (copyrighted - never commit)
+*.jar
+
+# Scratch scripts
+patch.py

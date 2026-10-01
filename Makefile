@@ -27,7 +27,7 @@ all: $(TARGET)
 
 MORE_CFLAGS = -O3 -fomit-frame-pointer -finline-functions -fno-strict-aliasing -DUSE_PRECOMPILED_HEADER=1 \
 	-I. \
-	-Ipspkvm/platform_gb300 \
+	-Ipspkvm/platform_gb300 -Ipspkvm/platform_gb300/fluidlite -Ipspkvm/platform_gb300/fluidlite/include \
 	-Ilibretro/core \
 	-Ipspkvm/javacall/interface \
 	-Ipspkvm/javacall/interface/common \
@@ -124,6 +124,25 @@ MORE_CFLAGS = -O3 -fomit-frame-pointer -finline-functions -fno-strict-aliasing -
 OBJS = \
 	pspkvm/platform_gb300/video.o \
 	pspkvm/platform_gb300/audio.o \
+	pspkvm/platform_gb300/m3g_gb300.o \
+	pspkvm/platform_gb300/mascot_native.o \
+	pspkvm/platform_gb300/fluidlite/fluid_chan.o \
+	pspkvm/platform_gb300/fluidlite/fluid_chorus.o \
+	pspkvm/platform_gb300/fluidlite/fluid_conv.o \
+	pspkvm/platform_gb300/fluidlite/fluid_defsfont.o \
+	pspkvm/platform_gb300/fluidlite/fluid_dsp_float.o \
+	pspkvm/platform_gb300/fluidlite/fluid_gen.o \
+	pspkvm/platform_gb300/fluidlite/fluid_hash.o \
+	pspkvm/platform_gb300/fluidlite/fluid_init.o \
+	pspkvm/platform_gb300/fluidlite/fluid_list.o \
+	pspkvm/platform_gb300/fluidlite/fluid_mod.o \
+	pspkvm/platform_gb300/fluidlite/fluid_ramsfont.o \
+	pspkvm/platform_gb300/fluidlite/fluid_rev.o \
+	pspkvm/platform_gb300/fluidlite/fluid_settings.o \
+	pspkvm/platform_gb300/fluidlite/fluid_synth.o \
+	pspkvm/platform_gb300/fluidlite/fluid_sys.o \
+	pspkvm/platform_gb300/fluidlite/fluid_tuning.o \
+	pspkvm/platform_gb300/fluidlite/fluid_voice.o \
 	pspkvm/platform_gb300/input.o \
 	pspkvm/platform_gb300/filesystem.o \
 	pspkvm/platform_gb300/timer.o \

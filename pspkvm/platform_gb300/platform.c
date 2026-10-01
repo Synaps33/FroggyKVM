@@ -67,6 +67,12 @@ extern volatile uint32_t g_joy_state;
 extern void frontend_check_hotkeys(void);
 extern void shutdown_game(void);
 
+/* Firmware pause menu (Resume / Reboot / Save / Load), including the
+ * framebuffer snapshot the save-state path needs. Lives in the frontend so
+ * that this core and the firmware's own dummy_run_emulator_menu() share one
+ * implementation. Returns 0 to resume. */
+extern int frontend_open_pause_menu(void);
+
 #define SF2000_HW_UP       0x0010
 #define SF2000_HW_DOWN     0x0040
 #define SF2000_HW_LEFT     0x0080
@@ -246,12 +252,22 @@ void gb300_poll_events(void) {
         uint32_t buttons = poll_gb300_buttons();
         gb300_input_poll(buttons);
 
-        /* 2. Check exit hotkey: SELECT + START. */
+        /* 2. SELECT + START opens the firmware pause menu
+         *    (Resume / Reboot / Save / Load) instead of bailing out of the
+         *    Java task, which used to look like a plain restart to the user.
+         *    Resume returns 0 and the game carries on; anything else exits. */
         if ((buttons & (PSP_CTRL_SELECT | PSP_CTRL_START)) == (PSP_CTRL_SELECT | PSP_CTRL_START)) {
-            xlog("[PSPKVM-GB300] Exit hotkey pressed. Longjmp to exit JavaTask.\n");
-            s_exit_requested = 1;
-            if (s_can_exit_jmp) {
-                longjmp(s_exit_jmp, 1);
+            int response;
+            /* Swallow the combo: run_emulator_menu() polls input itself and a
+             * still-held SELECT+START would immediately re-trigger. */
+            xlog("[PSPKVM-GB300] SELECT+START -> firmware pause menu\n");
+            response = frontend_open_pause_menu();
+            xlog("[PSPKVM-GB300] pause menu response = %d\n", response);
+            if (response != 0) {
+                s_exit_requested = 1;
+                if (s_can_exit_jmp) {
+                    longjmp(s_exit_jmp, 1);
+                }
             }
         }
     }
