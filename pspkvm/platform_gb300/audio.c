@@ -653,33 +653,21 @@ static int midi_stream_open(wav_player_t *p) {
     {
         int64_t totalFrames = (((int64_t)ms->totalTicks * ms->tempo) /
                                (1000000LL * ms->division)) * WAV_PCM_RATE;
-        int prefix = WAV_PCM_RATE * 10;
-        if (prefix > WAV_MAX_PCM_TOTAL / 2) prefix = WAV_MAX_PCM_TOTAL / 2;
+        /* Minimal head start (512 frames = ~23ms) so midi_stream_open() returns
+         * immediately without freezing the Java thread. wav_topup_midi() on the
+         * audio thread tops up the buffer incrementally in 4096-frame chunks. */
+        int prefix = 512;
         if (totalFrames > 0 && prefix > (int)totalFrames) prefix = (int)totalFrames;
         if (prefix > 0) {
-            /* Only a small head start here. Rendering the whole 10 s prefix
-             * in one call blocked the MIDlet thread for the full synthesis
-             * (Asphalt froze to 0 FPS when its music started, Doom stuttered
-             * on every new track). The mixer tops the buffer up incrementally
-             * instead, so no single call is expensive. */
-            int head = g_fl_synth ? (WAV_PCM_RATE / 4) : (WAV_PCM_RATE / 2);      /* 250ms / 500ms */
-            if (prefix > head) prefix = head;
             midi_stream_render(p, prefix);
             p->loopMidi = (totalFrames > 0 && (int64_t)ms->totalTicks * ms->tempo /
                            (1000000LL * ms->division) * WAV_PCM_RATE > p->pcmFrames);
-            xlog("[AUDIO] MIDI head: %d klatek (bufor uzupelniany na biezaco)\n",
-                 p->pcmFrames);
         }
     }
 
     /* Duration of the track, so Player.getDuration() still works.
      * seconds = ticks * tempo / (1e6 * PPQN), milliseconds = seconds * 1000. */
     p->durationMs = (int)(((int64_t)maxTick * ms->tempo) / (1000000LL * division) * 1000);
-    {
-        int64_t totalFrames = (((int64_t)maxTick * ms->tempo) / (1000000LL * division)) * WAV_PCM_RATE;
-        xlog("[AUDIO] MIDI opened: %d events, %d ticks (~%d ms, %d frames), streaming\n",
-             nev, (int)maxTick, p->durationMs, (int)totalFrames);
-    }
     return 1;
 }
 
@@ -1292,9 +1280,7 @@ Java_com_sun_mmedia_DirectPlayer_nInit(void) {
 
     KNI_EndHandles();
 
-    if (result) {
-        xlog("[AUDIO] nInit: handle=%d mime='%s'\n", result, g_wav[result - 1].mime);
-    } else {
+    if (!result) {
         xlog("[AUDIO] nInit: no free player slot\n");
     }
     KNI_ReturnInt(result);
@@ -1347,8 +1333,6 @@ Java_com_sun_mmedia_DirectPlayer_nBuffering(void) {
             p->raw = NULL;
             p->rawLen = 0;
         }
-        xlog("[AUDIO] handle %d: %d frames (%d ms) ready, mime='%s'\n",
-             handle, p->pcmFrames, p->durationMs, p->mime);
         KNI_ReturnInt(0);
     }
 
@@ -1402,7 +1386,6 @@ Java_com_sun_mmedia_DirectPlayer_nStart(void) {
         }
         p->playing = 1;
     }
-    xlog("[AUDIO] nStart: handle=%d frames=%d playing=%d\n", handle, p ? p->pcmFrames : -1, p ? p->playing : -1);
     KNI_ReturnBoolean(KNI_TRUE);
 }
 
@@ -1415,7 +1398,6 @@ Java_com_sun_mmedia_DirectPlayer_nStop(void) {
         p->paused = 0;
         p->pos = 0;
     }
-    xlog("[AUDIO] nStop: handle=%d pos=%d\n", handle, p ? p->pos : -1);
     KNI_ReturnBoolean(KNI_TRUE);
 }
 
@@ -1510,7 +1492,6 @@ Java_com_sun_mmedia_DirectVolume_nSetVolume(void) {
     if (vol < 0) vol = 0;
     if (vol > 100) vol = 100;
     if (p) p->volume = vol;
-    xlog("[AUDIO] nSetVolume: handle=%d vol=%d\n", handle, vol);
     KNI_ReturnInt(vol);
 }
 
@@ -1525,7 +1506,6 @@ Java_com_sun_mmedia_DirectVolume_nSetMute(void) {
     wav_player_t *p = wav_get(KNI_GetParameterAsInt(1));
     jboolean mute = KNI_GetParameterAsBoolean(2);
     if (p) p->muted = mute ? 1 : 0;
-    xlog("[AUDIO] nSetMute: handle=%d mute=%d\n", KNI_GetParameterAsInt(1), mute ? 1 : 0);
     KNI_ReturnBoolean(KNI_TRUE);
 }
 

@@ -60,9 +60,7 @@ char* javacall_devemu_get_device_pid(int dev) { (void)dev; return "Default"; }
 
 KNIEXPORT KNI_RETURNTYPE_INT
 KNIDECL(com_sun_midp_installer_DeviceDesc_getDeviceKeyCode0) {
-    int index = KNI_GetParameterAsInt(1);
     int key = KNI_GetParameterAsInt(2);
-    xlog("[DEVEDESC] getDeviceKeyCode0(dev=%d, key=%d) -> %d\n", index, key, key);
     KNI_ReturnInt(key);
 }
 

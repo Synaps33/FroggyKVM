@@ -400,10 +400,8 @@ void gb300_input_poll(uint32_t current_buttons) {
                 javacall_key jk = btn_configs[i].current_jkey;
                 if (jk != JAVACALL_KEY_INVALID) {
                     if (current_buttons & bit) {
-                        xlog("[PSPKVM-INPUT] %s PRESSED -> jkey %d\n", btn_configs[i].name, jk);
                         javanotify_key_event(jk, JAVACALL_KEYPRESSED);
                     } else {
-                        xlog("[PSPKVM-INPUT] %s RELEASED -> jkey %d\n", btn_configs[i].name, jk);
                         javanotify_key_event(jk, JAVACALL_KEYRELEASED);
                     }
                 }
@@ -418,13 +416,11 @@ void gb300_input_poll(uint32_t current_buttons) {
         if (current_buttons & PSP_CTRL_SELECT) {
             s_select_held = true;
             s_select_combo_used = false;
-            xlog("[PSPKVM-INPUT] SELECT HELD (combo modifier active)\n");
         } else {
             s_select_held = false;
             if (!s_select_combo_used) {
                 javacall_key jk = get_configured_key(PSP_CTRL_SELECT);
                 if (jk != JAVACALL_KEY_INVALID) {
-                    xlog("[PSPKVM-INPUT] SELECT TAP -> jkey %d\n", jk);
                     javanotify_key_event(jk, JAVACALL_KEYPRESSED);
                     javanotify_key_event(jk, JAVACALL_KEYRELEASED);
                 }
@@ -437,13 +433,11 @@ void gb300_input_poll(uint32_t current_buttons) {
         if (current_buttons & PSP_CTRL_START) {
             s_start_held = true;
             s_start_combo_used = false;
-            xlog("[PSPKVM-INPUT] START HELD (combo modifier active)\n");
         } else {
             s_start_held = false;
             if (!s_start_combo_used) {
                 javacall_key jk = get_configured_key(PSP_CTRL_START);
                 if (jk != JAVACALL_KEY_INVALID) {
-                    xlog("[PSPKVM-INPUT] START TAP -> jkey %d\n", jk);
                     javanotify_key_event(jk, JAVACALL_KEYPRESSED);
                     javanotify_key_event(jk, JAVACALL_KEYRELEASED);
                 }
@@ -485,8 +479,6 @@ void gb300_input_poll(uint32_t current_buttons) {
 
                 s_active_jkey[i] = jk;
                 if (jk != JAVACALL_KEY_INVALID) {
-                    xlog("[PSPKVM-INPUT] %s PRESSED -> jkey %d%s\n",
-                         btn_configs[i].name, jk, is_combo ? " (COMBO)" : "");
                     javanotify_key_event(jk, JAVACALL_KEYPRESSED);
                 }
             } else {
@@ -494,7 +486,6 @@ void gb300_input_poll(uint32_t current_buttons) {
                 javacall_key jk = s_active_jkey[i];
                 s_active_jkey[i] = JAVACALL_KEY_INVALID;
                 if (jk != JAVACALL_KEY_INVALID) {
-                    xlog("[PSPKVM-INPUT] %s RELEASED -> jkey %d\n", btn_configs[i].name, jk);
                     javanotify_key_event(jk, JAVACALL_KEYRELEASED);
                 }
             }
@@ -544,7 +535,6 @@ Java_javax_microedition_lcdui_KeyConverter_getGameAction(void) {
         case '3': action = 12; break; /* GAME_D */
         default:  action = 0; break;
     }
-    xlog("[KEY-ACTION] getGameAction(%d) -> %d\n", keyCode, action);
     KNI_ReturnInt(action);
 }
 
