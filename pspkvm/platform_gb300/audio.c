@@ -112,8 +112,6 @@ static int                g_fl_probed = 0;
 static const char *g_fl_soundfonts[] = {
     "/mnt/sda1/bios/Roland_SC-55.sf2",
     "/mnt/sda1/system/Roland_SC-55.sf2",
-    "/home/Sajnaps/gb300/bios/Roland_SC-55.sf2",
-    "/home/Sajnaps/gb300/froggykvm/Roland_SC-55.sf2",
     NULL
 };
 
@@ -143,16 +141,18 @@ static fluid_synth_t *midi_fluid_synth(void) {
 
 /* Max frames synthesised per mixer call, so no single call stalls
  * the emulator for long. 2048 frames is ~93 ms of audio. */
-#define MIDI_TOPUP_MAX 2048
+#define MIDI_TOPUP_MAX 4096
 
-/* Synthesis budget shared by every player for one gb300_audio_read() call.
- *
- * Doom RPG opens 22 MIDI tracks. With a per-player cap the mixer synthesised
- * 22 * cap frames on every output frame, which froze the device instantly
- * (it only looked OK on a desktop). One budget for the whole call makes the
- * worst case independent of how many tracks a game starts. */
-#define MIDI_BUDGET_PER_READ 4096
+/* Synthesis budget shared by every player for one gb300_audio_read() call. */
+#define MIDI_BUDGET_PER_READ 8192
 static int g_midi_budget = 0;
+
+/* All players share a single FluidLite synth, and every midi_stream_render()
+ * call advances that shared synth. With 22 tracks open (Doom RPG) the work was
+ * therefore multiplied by the number of tracks and the CPU pegged at 100%,
+ * freezing the device. Only one track may synthesise per gb300_audio_read();
+ * the others keep playing whatever is already buffered. */
+static int g_midi_synth_used = 0;
 
 typedef struct midi_stream_s midi_stream_t;
 
@@ -380,8 +380,10 @@ static void midi_init_waves(void) {
         /* triangle */
         if (i < 128) midi_wave[1][i] = (int8_t)((i * 2 - 128) * 120 / 128);
         else midi_wave[1][i] = (int8_t)((384 - i * 2) * 120 / 128);
-        /* square */
-        midi_wave[2][i] = (i < 128) ? 120 : -120;
+        /* square (softened edge at transitions to reduce harsh buzz) */
+        if (i == 0 || i == 128) midi_wave[2][i] = 0;
+        else if (i < 128) midi_wave[2][i] = 120;
+        else midi_wave[2][i] = -120;
         /* saw */
         midi_wave[3][i] = (int8_t)(((i - 128) * 120) / 128);
     }
@@ -442,19 +444,53 @@ static void midi_add_event(midi_event_t **pev, int *pnev, int *pcap, int tick,
 
 static void midi_synth(midi_voice_t *voices, int16_t *out, int frames) {
     int i, j;
+    int n_active = 0;
+    for (j = 0; j < MIDI_MAX_VOICES; j++) {
+        if (voices[j].active) n_active++;
+    }
+    if (n_active == 0) {
+        memset(out, 0, (size_t)frames * sizeof(int16_t));
+        return;
+    }
+
+    /* Dynamic shift based on polyphony to prevent clipping/crackling */
+    int shift = 7;
+    if (n_active > 8) shift = 10;
+    else if (n_active > 4) shift = 9;
+    else if (n_active > 2) shift = 8;
+
     for (i = 0; i < frames; i++) {
         int32_t acc = 0;
         for (j = 0; j < MIDI_MAX_VOICES; j++) {
             midi_voice_t *v = &voices[j];
             if (!v->active) continue;
-            acc += (int32_t)midi_wave[v->wave][(v->phase >> 16) & 0xFF] * (v->env >> 8) * v->gain;
+
+            /* Linear interpolation in wavetable:
+             * v->phase is 16.16 fixed-point (65536 = 1 full cycle of 256 samples).
+             * Bits [15:8] select sample index (0..255).
+             * Bits [7:0] select fraction (0..255) between index and index+1. */
+            uint8_t idx = (uint8_t)((v->phase >> 8) & 0xFF);
+            uint8_t frac = (uint8_t)(v->phase & 0xFF);
+            int32_t s0 = midi_wave[v->wave][idx];
+            int32_t s1 = midi_wave[v->wave][(idx + 1) & 0xFF];
+            int32_t sample = (s0 * (256 - frac) + s1 * frac) >> 8;
+
+            acc += sample * (v->env >> 8) * v->gain;
+
             if (!v->release) {
                 if (v->env < 32767) {
-                    v->env += 400;
+                    /* Smooth attack (~10ms) to eliminate note-on clicks */
+                    v->env += (v->ch == 9) ? 400 : 150;
                     if (v->env > 32767) v->env = 32767;
                 }
+                if (v->ch == 9) {
+                    /* Percussion naturally decays without waiting for note-off */
+                    v->release = 1;
+                }
             } else {
-                v->env -= 40;
+                /* Smooth release to eliminate note-off clicks */
+                int decay = (v->ch == 9) ? 120 : 50;
+                v->env -= decay;
                 if (v->env <= 0) {
                     v->env = 0;
                     v->active = 0;
@@ -462,7 +498,7 @@ static void midi_synth(midi_voice_t *voices, int16_t *out, int frames) {
             }
             v->phase += v->inc;
         }
-        acc >>= 7;
+        acc >>= shift;
         if (acc > 32767) acc = 32767;
         else if (acc < -32768) acc = -32768;
         out[i] = (int16_t)acc;
@@ -626,7 +662,7 @@ static int midi_stream_open(wav_player_t *p) {
              * (Asphalt froze to 0 FPS when its music started, Doom stuttered
              * on every new track). The mixer tops the buffer up incrementally
              * instead, so no single call is expensive. */
-            int head = WAV_PCM_RATE / 4;      /* 250 ms */
+            int head = g_fl_synth ? (WAV_PCM_RATE / 4) : (WAV_PCM_RATE / 2);      /* 250ms / 500ms */
             if (prefix > head) prefix = head;
             midi_stream_render(p, prefix);
             p->loopMidi = (totalFrames > 0 && (int64_t)ms->totalTicks * ms->tempo /
@@ -721,7 +757,11 @@ static int midi_stream_render(wav_player_t *p, int frames) {
             v->note = note;
             v->ch = ch;
             v->prog = ms->chanProg[ch];
-            v->wave = (ch == 9) ? 2 : midi_prog_wave(ms->chanProg[ch]);
+            if (ch == 9) {
+                v->wave = (note <= 36) ? 0 : 3;
+            } else {
+                v->wave = midi_prog_wave(ms->chanProg[ch]);
+            }
             v->phase = 0;
             v->inc = midi_note_phase_step[note];
             v->env = 0;
@@ -898,7 +938,11 @@ static int midi_render(wav_player_t *p) {
             v->note = note;
             v->ch = ch;
             v->prog = chanProg[ch];
-            v->wave = (ch == 9) ? 2 : midi_prog_wave(chanProg[ch]);
+            if (ch == 9) {
+                v->wave = (note <= 36) ? 0 : 3;
+            } else {
+                v->wave = midi_prog_wave(chanProg[ch]);
+            }
             v->phase = 0;
             v->inc = midi_note_phase_step[note];
             v->env = 0;
@@ -1031,67 +1075,62 @@ static int wav_decode(wav_player_t *p) {
     }
 }
 
+/* Top up MIDI buffers for active players. Called once per gb300_audio_read(). */
+static void wav_topup_midi(void) {
+    int i;
+    for (i = 0; i < WAV_MAX_PLAYERS; i++) {
+        wav_player_t *p = &g_wav[i];
+        if (!p->used || !p->playing || p->paused || !p->midi || !p->pcm) continue;
+
+        midi_stream_t *ms = (midi_stream_t *)p->midi;
+        int remaining = p->pcmFrames - p->pos;
+
+        /* The track ran out of events and we already buffered all of
+         * it: rewind if looping. */
+        if (ms && ms->done && remaining > 0 && remaining < WAV_PCM_RATE / 4) {
+            if (p->loopMidi) {
+                ms->ev_i = 0;
+                ms->curTick = 0;
+                ms->done = 0;
+                ms->looped = 0;
+                p->pcmFrames = 0;
+                p->pos = 0;
+                remaining = 0;
+            }
+        }
+
+        /* Only synthesise while there are events left.
+         * If using the fast built-in synth (g_fl_synth == NULL), each player has
+         * its own voices and synthesis is integer-only, so we don't gate it. */
+        if (ms && !ms->done && g_midi_budget > 0 && (!g_fl_synth || !g_midi_synth_used)) {
+            if (remaining < WAV_PCM_RATE * 2) {
+                int deficit = WAV_PCM_RATE * 2 - remaining;
+                int chunk = (deficit > MIDI_TOPUP_MAX) ? MIDI_TOPUP_MAX : deficit;
+                if (chunk > g_midi_budget) chunk = g_midi_budget;
+                if (midi_stream_render(p, chunk)) {
+                    g_midi_budget -= chunk;
+                    g_midi_synth_used = 1;
+                }
+            }
+        }
+    }
+}
+
 /* Mix one output frame (22050 Hz stereo) of all active WAV players */
 static void wav_mix_frame(int32_t *l, int32_t *r) {
     int i;
     for (i = 0; i < WAV_MAX_PLAYERS; i++) {
         wav_player_t *p = &g_wav[i];
-        if (!p->used || !p->playing || p->paused) continue;
+        if (!p->used || !p->playing || p->paused || !p->pcm) continue;
 
-        if (p->midi) {
-            /* Top the buffer up a little at a time.
-             *
-             * Two earlier mistakes are worth recording: rendering the whole
-             * 10 s prefix inside createPlayer froze Asphalt (0 FPS once the
-             * music started) and stuttered Doom on every new track, while
-             * adding a full extra second on every output frame was
-             * quadratic and saturated the CPU. So: keep ~1 s of audio ahead of
-             * the play head, but never render more than the actual deficit
-             * and never more than MIDI_TOPUP_MAX per call. */
-            if (!p->pcm) continue;
-            {
-                midi_stream_t *ms = (midi_stream_t *)p->midi;
-                int remaining = p->pcmFrames - p->pos;
-
-                /* The track ran out of events and we already buffered all of
-                 * it: stop here instead of appending silence forever, which
-                 * is what made long tracks fade out early. */
-                if (ms && ms->done && remaining > 0 && remaining < WAV_PCM_RATE / 4) {
-                    if (p->loopMidi) {
-                        /* Rewind and synthesise the next lap lazily. */
-                        ms->ev_i = 0;
-                        ms->curTick = 0;
-                        ms->done = 0;
-                        ms->looped = 0;
-                        p->pcmFrames = 0;
-                        p->pos = 0;
-                        remaining = 0;
-                    }
-                }
-
-                /* Only synthesise while there are events left. */
-                if (ms && !ms->done && g_midi_budget > 0) {
-                    if (remaining < WAV_PCM_RATE * 2) {
-                        int deficit = WAV_PCM_RATE * 2 - remaining;
-                        int chunk = (deficit > MIDI_TOPUP_MAX) ? MIDI_TOPUP_MAX : deficit;
-                        if (chunk > g_midi_budget) chunk = g_midi_budget;
-                        if (midi_stream_render(p, chunk)) {
-                            g_midi_budget -= chunk;
-                        }
-                    }
-                }
+        if (p->pos >= p->pcmFrames) {
+            if (p->midi && p->loopMidi) {
+                p->pos = 0;              /* seamless loop */
+            } else {
+                p->playing = 0;
+                p->pos = 0;
+                continue;
             }
-            if (p->pos >= p->pcmFrames) {
-                if (p->loopMidi) {
-                    p->pos = 0;              /* seamless loop */
-                } else {
-                    p->playing = 0;
-                    p->pos = 0;
-                    continue;
-                }
-            }
-        } else if (!p->pcm) {
-            continue;;
         }
 
         if (p->pos < p->pcmFrames) {
@@ -1102,8 +1141,6 @@ static void wav_mix_frame(int32_t *l, int32_t *r) {
             *r += (sr * vol) / 100;
             p->pos++;
             if (!p->midi && p->pos >= p->pcmFrames) {
-                /* Decoded WAV: stop at the end, as before. Streaming MIDI loops
-                 * instead, because its end is only reached while playing. */
                 p->playing = 0;
                 p->pos = 0;
             }
@@ -1124,6 +1161,9 @@ int gb300_audio_read(int16_t *dst, int num_frames) {
     if (!dst || num_frames <= 0) return 0;
 
     g_midi_budget = MIDI_BUDGET_PER_READ;
+    g_midi_synth_used = 0;
+
+    wav_topup_midi();
 
     for (int i = 0; i < num_frames; i++) {
         int32_t mix_l = 0;
