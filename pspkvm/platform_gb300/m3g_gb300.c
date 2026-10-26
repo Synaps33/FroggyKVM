@@ -47,10 +47,18 @@ static int m3g_enabled = -1;
 static int m3g_on(void) {
     if (m3g_enabled < 0) {
         const char *e = getenv("M3G_ENABLE");
-        /* Enabled by default now that the projection and viewport bugs are
-         * fixed. M3G_ENABLE=0 keeps the renderer inert so a game's 2D
-         * fallback stays visible while debugging. */
-        m3g_enabled = (e && e[0] == '0') ? 0 : 1;
+        FILE *f = fopen(FROGGY_SD_ROOT "/bios/disable_m3g.txt", "rb");
+        if (f) {
+            /* Escape hatch: drop this file on the card to turn the renderer
+             * off without rebuilding the core. */
+            fclose(f);
+            m3g_enabled = 0;
+            xlog("[M3G] disabled by disable_m3g.txt\n");
+        } else {
+            /* Enabled by default now that the projection and viewport bugs
+             * are fixed. M3G_ENABLE=0 does the same on the desktop runner. */
+            m3g_enabled = (e && e[0] == '0') ? 0 : 1;
+        }
     }
     return m3g_enabled;
 }
@@ -258,7 +266,7 @@ typedef struct {
     int handle;             /* our own "nBind" handle */
 
     unsigned int *color;    /* width*height, 0x00RRGGBB */
-    float *depth;           /* width*height, 1.0 = far */
+    unsigned short *depth;  /* width*height, 0xFFFF = far (16-bit saves 150 kB) */
 } m3g_ctx_t;
 
 static m3g_ctx_t g_m3g;
@@ -349,10 +357,17 @@ static int m3g_alloc_targets(int w, int h) {
     if (w <= 0 || h <= 0 || w > 1024 || h > 1024) {
         return 0;
     }
+    /* Games call bindTarget() every frame (the rollercoaster test does it
+     * ~60 times a second). Freeing and reallocating 600 kB of framebuffer on
+     * each bind fragmented the VM heap badly enough to fail the allocation on
+     * device, so keep the buffers when the size did not change. */
+    if (g_m3g.color && g_m3g.depth && g_m3g.width == w && g_m3g.height == h) {
+        return 1;
+    }
     m3g_free_targets();
     n = (size_t)w * (size_t)h;
     g_m3g.color = (unsigned int *)calloc(n, sizeof(unsigned int));
-    g_m3g.depth = (float *)calloc(n, sizeof(float));
+    g_m3g.depth = (unsigned short *)calloc(n, sizeof(unsigned short));
     if (!g_m3g.color || !g_m3g.depth) {
         m3g_free_targets();
         return 0;
@@ -580,7 +595,7 @@ static unsigned int sample_tex(const m3g_object_t *tex, float u, float v) {
 static void put_pixel(int x, int y, unsigned int rgb, float z, int blend,
                       int colorWrite, int depthWrite, int depthTest) {
     int idx;
-    float zmin, zmax;
+    unsigned short z16;
 
     if (x < g_m3g.vpX || x >= g_m3g.vpX + g_m3g.vpW) return;
     if (y < g_m3g.vpY || y >= g_m3g.vpY + g_m3g.vpH) return;
@@ -589,15 +604,14 @@ static void put_pixel(int x, int y, unsigned int rgb, float z, int blend,
 
     idx = y * g_m3g.width + x;
 
-    zmin = 0.0f;
-    zmax = 1.0f;
-    if (z < zmin) z = zmin;
-    if (z > zmax) z = zmax;
-    if (depthTest && z >= g_m3g.depth[idx]) {
+    if (z < 0.0f) z = 0.0f;
+    if (z > 1.0f) z = 1.0f;
+    z16 = (unsigned short)(z * 65535.0f);
+    if (depthTest && z16 >= g_m3g.depth[idx]) {
         return;             /* occluded by something closer */
     }
     if (depthWrite) {
-        g_m3g.depth[idx] = z;
+        g_m3g.depth[idx] = z16;
     }
     if (!colorWrite) {
         return;
@@ -824,6 +838,7 @@ Java_javax_microedition_m3g_Graphics3D_nBind(void) {
     g_m3g.zFar = 100.0f;
     if (!m3g_alloc_targets(w, h)) {
         M3G_LOG("[M3G] nBind failed for %dx%d\n", w, h);
+        xlog("[M3G] nBind: cannot allocate %dx%d targets\n", w, h);
         return 0;
     }
     g_m3g.active = 1;
@@ -889,7 +904,7 @@ Java_javax_microedition_m3g_Graphics3D_nClear(void) {
     size_t n = (size_t)g_m3g.width * (size_t)g_m3g.height, i;
     if ((mask & 0x1) && g_m3g.depth) {
         for (i = 0; i < n; i++) {
-            g_m3g.depth[i] = 1.0f;
+            g_m3g.depth[i] = 0xFFFFu;
         }
     }
     if ((mask & 0x2) && g_m3g.color) {
@@ -2118,7 +2133,7 @@ Java_javax_microedition_m3g_Image2D_nSetImage(void) {
                     for (x = 0; x < w; x++) {
                         jsize si = (jsize)((y * w + x) * bpp);
                         size_t di = (size_t)(y * w + x) * 3;
-                        if (si >= n) {
+                        if (si + bpp > n) {
                             break;
                         }
                         if (bpp == 3) {
