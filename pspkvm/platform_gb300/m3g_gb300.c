@@ -46,7 +46,11 @@ static int m3g_enabled = -1;
 
 static int m3g_on(void) {
     if (m3g_enabled < 0) {
-        m3g_enabled = (getenv("M3G_ENABLE") != NULL) ? 1 : 0;
+        const char *e = getenv("M3G_ENABLE");
+        /* Enabled by default now that the projection and viewport bugs are
+         * fixed. M3G_ENABLE=0 keeps the renderer inert so a game's 2D
+         * fallback stays visible while debugging. */
+        m3g_enabled = (e && e[0] == '0') ? 0 : 1;
     }
     return m3g_enabled;
 }
@@ -77,6 +81,7 @@ typedef enum {
     OBJ_FREE = 0,
     OBJ_VERTEX_ARRAY,
      OBJ_VERTEX_BUFFER,
+    OBJ_INDEX_BUFFER,
     OBJ_APPEARANCE,
     OBJ_MATERIAL,
     OBJ_COMPOSITING_MODE,
@@ -116,6 +121,13 @@ struct m3g_object {
             float texBias[8][3];
             int   vertexCount;
         } vb;
+        struct {                   /* OBJ_INDEX_BUFFER (TriangleStripArray) */
+            int *indices;           /* vertex indices, may be NULL if none */
+            int  count;
+            int *strips;            /* triangle strip lengths */
+            int  stripCount;
+            int  firstIndex;        /* implicit: first vertex index */
+        } ib;
         struct {                   /* OBJ_APPEARANCE */
             int material;           /* handle, -1 = none */
             int compositingMode;    /* handle, -1 = none */
@@ -209,6 +221,10 @@ static void m3g_free_handle(int handle) {
         free(o->u.va.sh);
         free(o->u.va.by);
         break;
+    case OBJ_INDEX_BUFFER:
+        free(o->u.ib.indices);
+        free(o->u.ib.strips);
+        break;
     case OBJ_IMAGE:
         free(o->u.img.rgb);
         break;
@@ -247,17 +263,67 @@ typedef struct {
 
 static m3g_ctx_t g_m3g;
 
+/* Host-only debugging aid: dump the shadow framebuffer after a render so the
+ * rasteriser output can be inspected without going through MIDP's screen
+ * flushing. Enabled with M3G_DUMP=<path>. */
+static void m3g_dump_fb(const char *path) {
+    FILE *f = fopen(path, "wb");
+    int x, y;
+    if (!f) {
+        return;
+    }
+    fprintf(f, "P6\n%d %d\n255\n", g_m3g.width, g_m3g.height);
+    for (y = 0; y < g_m3g.height; y++) {
+        for (x = 0; x < g_m3g.width; x++) {
+            unsigned int c = g_m3g.color[y * g_m3g.width + x];
+            fputc((int)((c >> 16) & 0xFF), f);
+            fputc((int)((c >> 8) & 0xFF), f);
+            fputc((int)(c & 0xFF), f);
+        }
+    }
+    fclose(f);
+}
+
 static void m3g_blit_to_screen(void) {
     int x, y;
     gxj_pixel_type *dst = gxj_system_screen_buffer.pixelData;
     int dw = gxj_system_screen_buffer.width;
     int dh = gxj_system_screen_buffer.height;
+    int x0, y0, x1, y1;
 
     if (!dst || dw <= 0 || dh <= 0 || !g_m3g.color) {
         return;
     }
-    for (y = 0; y < g_m3g.height && y < dh; y++) {
-        for (x = 0; x < g_m3g.width && x < dw; x++) {
+
+    /* Only the viewport belongs to us. Copying the whole shadow buffer used
+     * to wipe the game's 2D UI even when it rendered into a small viewport. */
+    x0 = g_m3g.vpX > 0 ? g_m3g.vpX : 0;
+    y0 = g_m3g.vpY > 0 ? g_m3g.vpY : 0;
+    x1 = g_m3g.vpX + g_m3g.vpW;
+    y1 = g_m3g.vpY + g_m3g.vpH;
+    if (x1 > g_m3g.width)  x1 = g_m3g.width;
+    if (y1 > g_m3g.height) y1 = g_m3g.height;
+    if (x1 > dw) x1 = dw;
+    if (y1 > dh) y1 = dh;
+    if (x0 >= x1 || y0 >= y1) {
+        return;
+    }
+
+    {
+        const char *dump = getenv("M3G_DUMP");
+        if (dump && dump[0]) {
+            static int seq = 0;
+            char path[256];
+            if (seq < 24) {
+                snprintf(path, sizeof(path), "%s_%02d.ppm", dump, seq);
+                m3g_dump_fb(path);
+            }
+            seq++;
+        }
+    }
+
+    for (y = y0; y < y1; y++) {
+        for (x = x0; x < x1; x++) {
             unsigned int c = g_m3g.color[y * g_m3g.width + x];
             int r = (int)((c >> 16) & 0xFF);
             int gg = (int)((c >> 8) & 0xFF);
@@ -357,7 +423,15 @@ static void mat_transform_vec(const m3g_mat_t *m, float x, float y, float z,
     *oz = m->m[8] * x + m->m[9] * y + m->m[10] * z;
 }
 
-/* Perspective projection from a symmetric frustum, then to screen space. */
+/* Perspective projection from a symmetric frustum, then to screen space.
+ *
+ * M3G stores matrices row-major and transforms column vectors:
+ *     out[row] = sum(col) m[row*4+col] * in[col]
+ * so the clip-space w comes from row 3 (m[12..15]) and the depth from row 2
+ * (m[8..11]).  An earlier version put -1 in m[11] and the depth offset in
+ * m[14], which transposed the two rows: w became z instead of -z and every
+ * vertex was projected with the wrong divisor.  That is what pushed geometry
+ * outside the viewport. */
 static void mat_perspective(m3g_mat_t *r, float fovy, float aspect,
                             float zNear, float zFar) {
     float f, dz;
@@ -373,12 +447,12 @@ static void mat_perspective(m3g_mat_t *r, float fovy, float aspect,
     memset(r->m, 0, sizeof(r->m));
     r->m[0]  = f / aspect;
     r->m[5]  = f;
-    r->m[10] = (zFar + zNear) / dz;
-    r->m[11] = -1.0f;
-    r->m[14] = (2.0f * zFar * zNear) / dz;
+    r->m[10] = (zFar + zNear) / dz;          /* depth scale   */
+    r->m[11] = (2.0f * zFar * zNear) / dz;   /* depth offset  */
+    r->m[14] = -1.0f;                        /* w = -z_eye    */
 }
 
-/* Orthographic projection. */
+/* Orthographic projection. Same row-major convention. */
 static void mat_parallel(m3g_mat_t *r, float height, float aspect,
                          float zNear, float zFar) {
     float w = height * aspect;
@@ -390,7 +464,7 @@ static void mat_parallel(m3g_mat_t *r, float height, float aspect,
     r->m[0]  = 2.0f / w;
     r->m[5]  = 2.0f / height;
     r->m[10] = -2.0f / dz;
-    r->m[14] = -(zFar + zNear) / dz;
+    r->m[11] = -(zFar + zNear) / dz;
     r->m[15] = 1.0f;
 }
 
@@ -517,10 +591,10 @@ static void put_pixel(int x, int y, unsigned int rgb, float z, int blend,
 
     zmin = 0.0f;
     zmax = 1.0f;
-    if (depthTest && z >= zmin && z <= zmax) {
-        if (z >= g_m3g.depth[idx]) {
-            return;             /* occluded by something closer */
-        }
+    if (z < zmin) z = zmin;
+    if (z > zmax) z = zmax;
+    if (depthTest && z >= g_m3g.depth[idx]) {
+        return;             /* occluded by something closer */
     }
     if (depthWrite) {
         g_m3g.depth[idx] = z;
@@ -528,7 +602,7 @@ static void put_pixel(int x, int y, unsigned int rgb, float z, int blend,
     if (!colorWrite) {
         return;
     }
-    if (blend) {
+    if (blend == 1) {
         unsigned int dst = g_m3g.color[idx];
         int dr = (int)((dst >> 16) & 0xFF);
         int dg = (int)((dst >> 8) & 0xFF);
@@ -539,6 +613,17 @@ static void put_pixel(int x, int y, unsigned int rgb, float z, int blend,
         g_m3g.color[idx] = (unsigned int)((clampi((dr + sr) / 2, 0, 255) << 16) |
                                            (clampi((dg + sg) / 2, 0, 255) << 8) |
                                             clampi((db + sb) / 2, 0, 255));
+    } else if (blend == 2) {
+        unsigned int dst = g_m3g.color[idx];
+        int dr = (int)((dst >> 16) & 0xFF);
+        int dg = (int)((dst >> 8) & 0xFF);
+        int db = (int)(dst & 0xFF);
+        int sr = (int)((rgb >> 16) & 0xFF);
+        int sg = (int)((rgb >> 8) & 0xFF);
+        int sb = (int)(rgb & 0xFF);
+        g_m3g.color[idx] = (unsigned int)((clampi(dr + sr, 0, 255) << 16) |
+                                           (clampi(dg + sg, 0, 255) << 8) |
+                                            clampi(db + sb, 0, 255));
     } else {
         g_m3g.color[idx] = rgb & 0xFFFFFFu;
     }
@@ -558,10 +643,9 @@ static void raster_triangle(const m3g_vtx_t *v0, const m3g_vtx_t *v1,
     if (area == 0.0f) {
         return;
     }
-    if (area < 0.0f) {
-        /* keep winding consistent; culling is handled separately */
-        area = -area;
-    }
+    /* Keep the signed area: the barycentric weights below are divided by it,
+     * so flipping the sign without also flipping the numerators rejects every
+     * pixel. Culling is not implemented yet, so the winding sign is unused. */
 
     ax = v0->x; ay = v0->y; bx = v1->x; by = v1->y; cx = v2->x; cy = v2->y;
 
@@ -588,9 +672,9 @@ static void raster_triangle(const m3g_vtx_t *v0, const m3g_vtx_t *v1,
             if (w0 < -0.001f || w1 < -0.001f || w2 < -0.001f) {
                 continue;
             }
-            z = v0->z * w2 + v1->z * w0 + v2->z * w1;
-            u  = v0->u * w2 + v1->u * w0 + v2->u * w1;
-            v  = v0->v * w2 + v1->v * w0 + v2->v * w1;
+            z = v0->z * w0 + v1->z * w1 + v2->z * w2;
+            u  = v0->u * w0 + v1->u * w1 + v2->u * w2;
+            v  = v0->v * w0 + v1->v * w1 + v2->v * w2;
 
             rgb = tex ? sample_tex(tex, u, v) : baseColor;
             put_pixel(x, y, rgb, z, blend, colorWrite, depthWrite, depthTest);
@@ -616,7 +700,7 @@ static int m3g_new(m3g_objtype_t t) {
             o->u.app.texture[i] = -1;
         }
     } else if (t == OBJ_COMPOSITING_MODE) {
-        o->u.comp.blending = 2;      /* REPLACE */
+        o->u.comp.blending = 68;     /* REPLACE (M3G value, not an enum index) */
         o->u.comp.depthTest = 1;
         o->u.comp.depthWrite = 1;
         o->u.comp.colorWrite = 1;
@@ -742,10 +826,16 @@ Java_javax_microedition_m3g_Graphics3D_nBind(void) {
         M3G_LOG("[M3G] nBind failed for %dx%d\n", w, h);
         return 0;
     }
+    g_m3g.active = 1;
     g_m3g.handle = g_m3g_next_handle++;
     M3G_LOG("[M3G] nBind %dx%d hints=0x%x depth=%d -> handle %d\n",
             w, h, (int)hints, (int)depth, g_m3g.handle);
-    return g_m3g.handle;
+
+    /* bindTarget() decodes the result as width << 16 | height and then calls
+     * nSetViewport(0, 0, width, height) with it. Returning the bare handle
+     * (as this used to) left the viewport at 0x5 pixels, so every triangle
+     * was clipped away no matter how correct the transforms were. */
+    return ((w & 0xFFFF) << 16) | (h & 0xFFFF);
 }
 
 KNIEXPORT KNI_RETURNTYPE_INT
@@ -903,32 +993,6 @@ Java_javax_microedition_m3g_Graphics3D_nRenderImmediate(void) {
     }
 
     m3g_rendercalls++;
-    if (m3g_rendercalls <= m3g_dump) {
-        int r;
-        printf("[M3G-X] call %d: vcount=%d uv=%d app=%d\n",
-               m3g_rendercalls, vcount, uvcount, (int)appHandle);
-        printf("[M3G-X] objXform rows:");
-        for (r = 0; r < 4; r++) {
-            printf(" [%.2f %.2f %.2f %.2f]", objXform.m[r*4], objXform.m[r*4+1],
-                   objXform.m[r*4+2], objXform.m[r*4+3]);
-        }
-        printf("\n[M3G-X] camWorld rows:");
-        for (r = 0; r < 4; r++) {
-            printf(" [%.2f %.2f %.2f %.2f]", camWorld.m[r*4], camWorld.m[r*4+1],
-                   camWorld.m[r*4+2], camWorld.m[r*4+3]);
-        }
-        printf("\n[M3G-X] MVP rows:");
-        for (r = 0; r < 4; r++) {
-            printf(" [%.4f %.4f %.4f %.4f]", mvp.m[r*4], mvp.m[r*4+1],
-                   mvp.m[r*4+2], mvp.m[r*4+3]);
-        }
-        printf("\n[M3G-X] raw pos[0..3] (x,y,z):");
-        for (r = 0; r < 4 && r < vcount; r++) {
-            printf(" (%.1f,%.1f,%.1f)", pos[r*3], pos[r*3+1], pos[r*3+2]);
-        }
-        printf("\n");
-        fflush(stdout);
-    }
 
     if (app && app->type == OBJ_APPEARANCE) {
         mat  = m3g_get(app->u.app.material);
@@ -936,11 +1000,24 @@ Java_javax_microedition_m3g_Graphics3D_nRenderImmediate(void) {
         poly = m3g_get(app->u.app.polygonMode);
         tex  = m3g_get(app->u.app.texture[0]);
     }
-    if (mat && mat->type == OBJ_MATERIAL && mat->u.mat.color) {
-        baseColor = (unsigned int)(mat->u.mat.color & 0xFFFFFF);
+    if (mat && mat->type == OBJ_MATERIAL) {
+        unsigned int c = (unsigned int)mat->u.mat.color;
+        if (!c) c = (unsigned int)mat->u.mat.ambient;
+        if (!c) c = (unsigned int)mat->u.mat.emissive;
+        if (c) baseColor = c & 0xFFFFFF;
     }
     if (comp && comp->type == OBJ_COMPOSITING_MODE) {
-        blend      = comp->u.comp.blending;
+        /* M3G encoding: ALPHA = 64, ALPHA_ADD = 65, MODULATE = 66,
+         * MODULATE_X2 = 67, REPLACE = 68. This used to be stored as a
+         * truthy "blend" flag, so REPLACE blended 50/50 with the framebuffer
+         * and every object came out half dark. */
+        if (comp->u.comp.blending == 64) {
+            blend = 1;                      /* ALPHA      */
+        } else if (comp->u.comp.blending == 65) {
+            blend = 2;                      /* ALPHA_ADD  */
+        } else {
+            blend = 0;                      /* REPLACE    */
+        }
         depthTest  = comp->u.comp.depthTest;
         depthWrite = comp->u.comp.depthWrite;
         colorWrite = comp->u.comp.colorWrite;
@@ -1017,32 +1094,93 @@ Java_javax_microedition_m3g_Graphics3D_nRenderImmediate(void) {
         float cx, cy, cz, cw;
         mat_transform_point(&mvp, pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2],
                             &cx, &cy, &cz, &cw);
-        if (cw <= 0.0001f || cw < 0.0f) {
+        if (cw <= 0.0001f) {
             vtx[i].culled = 1;
             continue;
         }
         cx /= cw; cy /= cw; cz /= cw;
         vtx[i].x = g_m3g.vpX + (cx * 0.5f + 0.5f) * g_m3g.vpW;
-        vtx[i].y = g_m3g.vpY + (cy * 0.5f + 0.5f) * g_m3g.vpH;
-        vtx[i].z = cz;
+        /* NDC +Y points up, screen rows grow downwards. Without this flip the
+         * whole scene was rendered upside down (a symmetric test quad hides
+         * it, anything else does not). */
+        vtx[i].y = g_m3g.vpY + (1.0f - (cy * 0.5f + 0.5f)) * g_m3g.vpH;
+        /* clip-space z is [-1,1] with -1 at the near plane; the z-buffer is
+         * cleared to 1.0, so map it into [0,1] before the depth test. */
+        vtx[i].z = cz * 0.5f + 0.5f;
+        if (vtx[i].z < 0.0f) vtx[i].z = 0.0f;
+        if (vtx[i].z > 1.0f) vtx[i].z = 1.0f;
         if (uv && i < uvcount) {
             vtx[i].u = uv[i * 2];
             vtx[i].v = uv[i * 2 + 1];
         }
     }
 
-    /* Consecutive vertices form a triangle strip. */
-    for (i = 0; i + 2 < vcount; i += 2) {
-        int a = i, b = i + 1, c = i + 2;
-        if (vtx[a].culled || vtx[b].culled || vtx[c].culled) {
-            continue;
+    if (m3g_debug() && m3g_rendercalls <= 3) {
+        int r;
+        printf("[M3G-X] call=%d vcount=%d vp=(%d,%d %dx%d) color=%06X blend=%d\n",
+               m3g_rendercalls, vcount, g_m3g.vpX, g_m3g.vpY,
+               g_m3g.vpW, g_m3g.vpH, baseColor, blend);
+        for (r = 0; r < vcount && r < 6; r++) {
+            printf("[M3G-X]   v%d model=(%.1f,%.1f,%.1f) screen=(%.1f,%.1f,%.3f) uv=(%.3f,%.3f)%s\n",
+                   r, pos[r*3], pos[r*3+1], pos[r*3+2],
+                   vtx[r].x, vtx[r].y, vtx[r].z, vtx[r].u, vtx[r].v,
+                   vtx[r].culled ? " CULLED" : "");
         }
-        if ((i & 2) == 0) {
-            raster_triangle(&vtx[a], &vtx[b], &vtx[c], tex, baseColor, blend,
-                            depthTest, depthWrite, colorWrite);
-        } else {
-            raster_triangle(&vtx[a], &vtx[c], &vtx[b], tex, baseColor, blend,
-                            depthTest, depthWrite, colorWrite);
+        fflush(stdout);
+    }
+
+    {
+        /* Draw the indexed triangle strips.  The index buffer used to be
+         * ignored entirely, which only worked for the degenerate case where
+         * the vertices happened to be in strip order and formed one strip;
+         * real meshes have several strips and an arbitrary index order. */
+        m3g_object_t *ib = m3g_get(ibHandle);
+        int haveIdx = (ib && ib->type == OBJ_INDEX_BUFFER &&
+                       ib->u.ib.count > 0 && ib->u.ib.indices);
+        int stripCount = (haveIdx && ib->u.ib.stripCount > 0)
+                       ? ib->u.ib.stripCount : 1;
+        int idxPos = 0, s;
+
+        for (s = 0; s < stripCount; s++) {
+            int len = (haveIdx && ib->u.ib.stripCount > 0)
+                    ? ib->u.ib.strips[s]
+                    : vcount - idxPos;
+            int t;
+
+            if (len < 3) {
+                idxPos += len;
+                continue;
+            }
+            for (t = 0; t + 2 < len; t++) {
+                int a, b, c;
+                if (haveIdx) {
+                    if (idxPos + t + 2 >= ib->u.ib.count) {
+                        break;
+                    }
+                    a = ib->u.ib.indices[idxPos + t];
+                    b = ib->u.ib.indices[idxPos + t + 1];
+                    c = ib->u.ib.indices[idxPos + t + 2];
+                } else {
+                    a = idxPos + t;
+                    b = idxPos + t + 1;
+                    c = idxPos + t + 2;
+                }
+                if (a < 0 || b < 0 || c < 0 ||
+                    a >= vcount || b >= vcount || c >= vcount) {
+                    continue;
+                }
+                if (vtx[a].culled || vtx[b].culled || vtx[c].culled) {
+                    continue;
+                }
+                if (t & 1) {
+                    raster_triangle(&vtx[a], &vtx[c], &vtx[b], tex, baseColor,
+                                    blend, depthTest, depthWrite, colorWrite);
+                } else {
+                    raster_triangle(&vtx[a], &vtx[b], &vtx[c], tex, baseColor,
+                                    blend, depthTest, depthWrite, colorWrite);
+                }
+            }
+            idxPos += len;
         }
     }
     (void)poly; (void)j;
@@ -1093,43 +1231,43 @@ Java_javax_microedition_m3g_VertexArray_nCreate(void) {
 KNIEXPORT KNI_RETURNTYPE_VOID
 Java_javax_microedition_m3g_VertexArray_nSetShort(void) {
     jint handle = KNI_GetParameterAsInt(1);
-    jint offset = KNI_GetParameterAsInt(2);
-    jint count = KNI_GetParameterAsInt(3);
+    jint firstVertex = KNI_GetParameterAsInt(2);
+    jint numVertices = KNI_GetParameterAsInt(3);
 
     m3g_object_t *o = m3g_get(handle);
     jsize n;
-    int stride, total, start, i;
+    int nc, total, start, i, copy;
 
     KNI_StartHandles(1);
     KNI_DeclareHandle(data);
     KNI_GetParameterAsObject(4, data);
 
     if (o && o->type == OBJ_VERTEX_ARRAY && data) {
-        n = KNI_GetArrayLength(data);
-        if (n < count) {
-            count = n;
-        }
-        stride = o->u.va.numComponents;
-        if (stride < 1) {
-            stride = 1;
-        }
-        total = o->u.va.numVertices * stride;
-        if (o->u.va.count < total) {
-            total = o->u.va.count;
-        }
+        /* VertexArray.set(first, count, values): both numbers are in
+         * VERTICES, and the Java side hands us the caller's array starting at
+         * element 0. The old code treated `count` as a number of components
+         * and `first` as a byte offset, so only the first vertex was stored
+         * and every later vertex read as zero. */
+        nc = o->u.va.numComponents > 0 ? o->u.va.numComponents : 1;
+        total = o->u.va.numVertices * nc;
         if (!o->u.va.sh) {
             o->u.va.sh = (short *)calloc(total > 0 ? total : 1, sizeof(short));
         }
+        n = KNI_GetArrayLength(data);
+        copy = numVertices * nc;
+        if (copy > n) {
+            copy = (int)n;
+        }
+        start = (int)firstVertex * nc;
         if (o->u.va.sh) {
-            start = (int)offset / 2;
-            for (i = 0; i < (int)count; i++) {
+            for (i = 0; i < copy; i++) {
                 int idx = start + i;
                 if (idx >= 0 && idx < total) {
                     o->u.va.sh[idx] = KNI_GetShortArrayElement(data, i);
                 }
             }
-            M3G_LOG("[M3G] VertexArray nSetShort h=%d off=%d count=%d stride=%d total=%d\n",
-                    (int)handle, (int)offset, (int)count, stride, total);
+            M3G_LOG("[M3G] VertexArray nSetShort h=%d first=%d verts=%d nc=%d total=%d\n",
+                    (int)handle, (int)firstVertex, (int)numVertices, nc, total);
         }
     }
     KNI_EndHandles();
@@ -1138,32 +1276,34 @@ Java_javax_microedition_m3g_VertexArray_nSetShort(void) {
 KNIEXPORT KNI_RETURNTYPE_VOID
 Java_javax_microedition_m3g_VertexArray_nSetByte(void) {
     jint handle = KNI_GetParameterAsInt(1);
-    jint offset = KNI_GetParameterAsInt(2);
-    jint count = KNI_GetParameterAsInt(3);
+    jint firstVertex = KNI_GetParameterAsInt(2);
+    jint numVertices = KNI_GetParameterAsInt(3);
 
     m3g_object_t *o = m3g_get(handle);
     jsize n;
-    int total, i;
+    int nc, total, start, i, copy;
 
     KNI_StartHandles(1);
     KNI_DeclareHandle(data);
     KNI_GetParameterAsObject(4, data);
 
     if (o && o->type == OBJ_VERTEX_ARRAY && data) {
-        n = KNI_GetArrayLength(data);
-        if (n < count) {
-            count = n;
-        }
-        total = o->u.va.numVertices * (o->u.va.numComponents > 0
-                                       ? o->u.va.numComponents : 1);
+        nc = o->u.va.numComponents > 0 ? o->u.va.numComponents : 1;
+        total = o->u.va.numVertices * nc;
         if (!o->u.va.by) {
             o->u.va.by = (signed char *)calloc(total > 0 ? total : 1, 1);
         }
+        n = KNI_GetArrayLength(data);
+        copy = numVertices * nc;
+        if (copy > n) {
+            copy = (int)n;
+        }
+        start = (int)firstVertex * nc;
         if (o->u.va.by) {
-            for (i = 0; i < (int)count; i++) {
-                int idx = (int)offset + i;
+            for (i = 0; i < copy; i++) {
+                int idx = start + i;
                 if (idx >= 0 && idx < total) {
-                    o->u.va.by[idx] = KNI_GetByteArrayElement(data, i);
+                    o->u.va.by[idx] = (signed char)KNI_GetByteArrayElement(data, i);
                 }
             }
         }
@@ -1289,6 +1429,104 @@ Java_javax_microedition_m3g_VertexBuffer_nSetDefaultColor(void) {
 
     (void)handle; (void)color;
     KNI_ReturnVoid();
+}
+
+/* ------------------------------------------------------------------ */
+/* IndexBuffer / TriangleStripArray                                    */
+
+/* nCreateImplicit(firstIndex, stripLengths): the Java side has already
+ * expanded the indices, but it does not hand them to us, so rebuild them
+ * the same way TriangleStripArray itself does (firstIndex + i). */
+KNIEXPORT KNI_RETURNTYPE_INT
+Java_javax_microedition_m3g_TriangleStripArray_nCreateImplicit(void) {
+    jint firstIndex = KNI_GetParameterAsInt(1);
+    int h = m3g_new(OBJ_INDEX_BUFFER);
+    m3g_object_t *o = m3g_get(h);
+    int total = 0, i;
+    jsize ns;
+
+    if (!o || o->type != OBJ_INDEX_BUFFER) {
+        return 0;
+    }
+
+    KNI_StartHandles(1);
+    KNI_DeclareHandle(strips);
+    KNI_GetParameterAsObject(2, strips);
+    if (strips) {
+        ns = KNI_GetArrayLength(strips);
+        if (ns > 0) {
+            o->u.ib.strips = (int *)calloc((size_t)ns, sizeof(int));
+            o->u.ib.stripCount = (int)ns;
+            for (i = 0; i < ns; i++) {
+                int len = (int)KNI_GetIntArrayElement(strips, i);
+                o->u.ib.strips[i] = len;
+                total += len;
+            }
+        }
+    }
+    KNI_EndHandles();
+
+    o->u.ib.firstIndex = (int)firstIndex;
+    if (total > 0) {
+        o->u.ib.indices = (int *)malloc(sizeof(int) * (size_t)total);
+        if (o->u.ib.indices) {
+            o->u.ib.count = total;
+            for (i = 0; i < total; i++) {
+                o->u.ib.indices[i] = (int)firstIndex + i;
+            }
+        }
+    }
+    M3G_LOG("[M3G] IndexBuffer implicit h=%d first=%d strips=%d count=%d\n",
+            h, (int)firstIndex, o->u.ib.stripCount, o->u.ib.count);
+    return h;
+}
+
+KNIEXPORT KNI_RETURNTYPE_INT
+Java_javax_microedition_m3g_TriangleStripArray_nCreateExplicit(void) {
+    int h = m3g_new(OBJ_INDEX_BUFFER);
+    m3g_object_t *o = m3g_get(h);
+    int i;
+    jsize n;
+
+    if (!o || o->type != OBJ_INDEX_BUFFER) {
+        return 0;
+    }
+
+    KNI_StartHandles(2);
+    KNI_DeclareHandle(indices);
+    KNI_DeclareHandle(strips);
+    KNI_GetParameterAsObject(1, indices);
+    KNI_GetParameterAsObject(2, strips);
+
+    if (indices) {
+        n = KNI_GetArrayLength(indices);
+        if (n > 0) {
+            o->u.ib.indices = (int *)malloc(sizeof(int) * (size_t)n);
+            if (o->u.ib.indices) {
+                o->u.ib.count = (int)n;
+                for (i = 0; i < n; i++) {
+                    o->u.ib.indices[i] = (int)KNI_GetIntArrayElement(indices, i);
+                }
+            }
+        }
+    }
+    if (strips) {
+        n = KNI_GetArrayLength(strips);
+        if (n > 0) {
+            o->u.ib.strips = (int *)calloc((size_t)n, sizeof(int));
+            if (o->u.ib.strips) {
+                o->u.ib.stripCount = (int)n;
+                for (i = 0; i < n; i++) {
+                    o->u.ib.strips[i] = (int)KNI_GetIntArrayElement(strips, i);
+                }
+            }
+        }
+    }
+    KNI_EndHandles();
+
+    M3G_LOG("[M3G] IndexBuffer explicit h=%d strips=%d count=%d\n",
+            h, o->u.ib.stripCount, o->u.ib.count);
+    return h;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1420,10 +1658,21 @@ Java_javax_microedition_m3g_Appearance_nGetLayer(void) {
 KNIEXPORT KNI_RETURNTYPE_VOID
 Java_javax_microedition_m3g_Material_nSetColor(void) {
     jint h = KNI_GetParameterAsInt(1);
-    jint col = KNI_GetParameterAsInt(2);
+    jint target = KNI_GetParameterAsInt(2);
+    jint col = KNI_GetParameterAsInt(3);
 
     m3g_object_t *o = m3g_get(h);
-    if (o && o->type == OBJ_MATERIAL) { o->u.mat.color = (int)col; }
+    /* Material.setColor(target, color) -> nSetColor(handle, target, color).
+     * The old code read parameter 2 as the colour, which is actually the
+     * target mask (AMBIENT = 1024, DIFFUSE = 2048, ...), so every material
+     * ended up with the mask as its colour. */
+    if (o && o->type == OBJ_MATERIAL) {
+        col &= 0xFFFFFF;
+        if (target & 1024) o->u.mat.ambient  = (int)col;
+        if (target & 2048) o->u.mat.color    = (int)col;
+        if (target & 4096) o->u.mat.emissive = (int)col;
+        if (target & 8192) o->u.mat.specular = (int)col;
+    }
     KNI_ReturnVoid();
 }
 
@@ -1433,8 +1682,12 @@ Java_javax_microedition_m3g_Material_nGetColor(void) {
     jint which = KNI_GetParameterAsInt(2);
 
     m3g_object_t *o = m3g_get(h);
-    (void)which;
-    if (o && o->type == OBJ_MATERIAL) { return o->u.mat.color; }
+    if (o && o->type == OBJ_MATERIAL) {
+        if (which & 1024) return o->u.mat.ambient;
+        if (which & 2048) return o->u.mat.color;
+        if (which & 4096) return o->u.mat.emissive;
+        if (which & 8192) return o->u.mat.specular;
+    }
     return 0xFFFFFFFF;
 }
 
@@ -1808,9 +2061,13 @@ Java_javax_microedition_m3g_Transformable_nGetOrientation(void) {
 
 KNIEXPORT KNI_RETURNTYPE_INT
 Java_javax_microedition_m3g_Image2D_nCreate(void) {
-    jint w = KNI_GetParameterAsInt(1);
-    jint h = KNI_GetParameterAsInt(2);
-    jint format = KNI_GetParameterAsInt(3);
+    /* Image2D.createDeferred() calls nCreate(format, width, height, flags).
+     * The old code read them as (width, height, format), so an RGB image
+     * (format 99) was stored as a 99-pixel-wide bitmap of the wrong height
+     * and every texture lookup went out of bounds or sampled garbage. */
+    jint format = KNI_GetParameterAsInt(1);
+    jint w = KNI_GetParameterAsInt(2);
+    jint h = KNI_GetParameterAsInt(3);
 
     m3g_object_t *o = m3g_get(m3g_alloc(OBJ_IMAGE));
     if (!o) {
@@ -1835,13 +2092,25 @@ Java_javax_microedition_m3g_Image2D_nSetImage(void) {
     KNI_DeclareHandle(data);
     KNI_GetParameterAsObject(2, data);
 
+    M3G_LOG("[M3G] Image2D nSetImage enter h=%d obj=%p\n", (int)handle, (void *)o);
+
     if (o && o->type == OBJ_IMAGE && data) {
         n = KNI_GetArrayLength(data);
         w = o->u.img.width;
         h = o->u.img.height;
         fmt = o->u.img.format;
+        /* M3G pixel formats: ALPHA 96, LUMINANCE 97, LUMINANCE_ALPHA 98,
+         * RGB 99, RGBA 100. */
+        if (fmt == 100) {
+            bpp = 4;
+        } else if (fmt == 99) {
+            bpp = 3;
+        } else if (fmt == 98) {
+            bpp = 2;
+        } else {
+            bpp = 1;
+        }
         if (n > 0 && w > 0 && h > 0) {
-            bpp = (fmt == 2 || fmt == 4 || fmt == 5) ? 3 : 1;
             free(o->u.img.rgb);
             o->u.img.rgb = (unsigned char *)calloc((size_t)w * h * 3, 1);
             if (o->u.img.rgb) {
@@ -1912,12 +2181,21 @@ Java_javax_microedition_m3g_Image2D_nGetFormat(void) {
 
 KNIEXPORT KNI_RETURNTYPE_INT
 Java_javax_microedition_m3g_Texture2D_nCreate(void) {
-    jint blending = KNI_GetParameterAsInt(1);
+    /* Texture2D.createDeferred() calls nCreate(imageHandle): the single
+     * parameter is the image, not the blend function. Treating it as the
+     * blend mode left every texture without an image, so sample_tex() always
+     * returned its white fallback and everything rendered untextured. */
+    jint image = KNI_GetParameterAsInt(1);
 
     int hnd = m3g_new(OBJ_TEXTURE);
     m3g_object_t *o = m3g_get(hnd);
     if (o && o->type == OBJ_TEXTURE) {
-        o->u.tex.blending = (int)blending;
+        o->u.tex.image = (int)image;
+        o->u.tex.blending = 227;     /* FUNC_MODULATE (constructor default) */
+        o->u.tex.filterMode = 0;     /* nearest */
+        o->u.tex.wrapS = 1;          /* WRAP_REPEAT */
+        o->u.tex.wrapT = 1;
+        M3G_LOG("[M3G] Texture2D nCreate tex=%d image=%d\n", hnd, (int)image);
     }
     return hnd;
 }
@@ -1943,7 +2221,8 @@ Java_javax_microedition_m3g_Texture2D_nSetFiltering(void) {
 
     m3g_object_t *o = m3g_get(h);
     if (o && o->type == OBJ_TEXTURE) {
-        o->u.tex.filterMode = (mag == 2 || min == 2) ? 1 : 0;
+        /* FILTER_BASE_LEVEL 208, FILTER_LINEAR 209, FILTER_NEAREST 210 */
+        o->u.tex.filterMode = (mag == 209 || min == 209) ? 1 : 0;
     }
     KNI_ReturnVoid();
 }
@@ -1956,8 +2235,9 @@ Java_javax_microedition_m3g_Texture2D_nSetWrapping(void) {
 
     m3g_object_t *o = m3g_get(h);
     if (o && o->type == OBJ_TEXTURE) {
-        o->u.tex.wrapS = (ws == 0) ? 1 : 0;
-        o->u.tex.wrapT = (wt == 0) ? 1 : 0;
+        /* WRAP_CLAMP 240, WRAP_REPEAT 241 */
+        o->u.tex.wrapS = (ws == 241) ? 1 : 0;
+        o->u.tex.wrapT = (wt == 241) ? 1 : 0;
     }
     KNI_ReturnVoid();
 }
